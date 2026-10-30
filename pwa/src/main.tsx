@@ -16,10 +16,12 @@ import {groupConversations,messageTime,optimisticConversation,reuseRecords} from
 import {useListMotion} from './listMotion';
 import {useNavigation} from './navigation';
 import {useContextMotion} from './contextMotion';
+import {useViewport} from './viewport';
 
 const EMPTY:Sms[]=[];
 
 function App(){
+ useViewport();
  const [paired,setPaired]=useState(false),[pairing,setPairing]=useState(false),[code,setCode]=useState('');
  const [rows,setRows]=useState<Sms[]>([]),[outgoing,setOutgoing]=useState<Sms[]>([]),[cursor,setCursor]=useState<string|null>(null);
  const [active,setActive]=useState<string|null>(null),[screen,setScreen]=useState('messages'),[search,setSearch]=useState('');
@@ -85,10 +87,7 @@ function App(){
    for(const result of results)if(result.status==='rejected')fail(result.reason);
   }finally{loading.current=false}
  }
- useEffect(()=>{api('status').then(()=>setPaired(true)).catch(e=>{if(!(e instanceof ApiError&&e.status===401))fail(e)});
-  const viewport=()=>{document.documentElement.style.setProperty('--height',`${window.visualViewport?.height||window.innerHeight}px`);document.documentElement.style.setProperty('--viewport-top',`${window.visualViewport?.offsetTop||0}px`)};
-  viewport();window.visualViewport?.addEventListener('resize',viewport);window.visualViewport?.addEventListener('scroll',viewport);return()=>{window.visualViewport?.removeEventListener('resize',viewport);window.visualViewport?.removeEventListener('scroll',viewport)};
- },[]);
+ useEffect(()=>{api('status').then(()=>setPaired(true)).catch(e=>{if(!(e instanceof ApiError&&e.status===401))fail(e)})},[]);
  useEffect(()=>{if(!paired)return;void refresh();api<{id:number,name:string}[]>('sims').then(s=>{setSims(s);setSim(s[0]?.id.toString()||'')}).catch(fail);
   const timer=setInterval(()=>{if(!document.hidden)void refresh()},8000); const visible=()=>{if(!document.hidden)void refresh()};document.addEventListener('visibilitychange',visible);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible)};
  },[paired]);
@@ -118,13 +117,19 @@ function App(){
  const actionDialog=useRef<HTMLDialogElement>(null),deleteDialog=useRef<HTMLDialogElement>(null);
  const lastContext=useRef<string|null>(null);if(contextKey)lastContext.current=contextKey;
  const [selected,setSelected]=useState<Set<string>>(new Set()),[details,setDetails]=useState<string|null>(null),[sheet,setSheet]=useState(false);
- const listView=useRef<HTMLDivElement>(null),chatView=useRef<HTMLElement>(null),textarea=useRef<HTMLTextAreaElement>(null),dialog=useRef<HTMLDialogElement>(null);
+ const listView=useRef<HTMLDivElement>(null),chatView=useRef<HTMLElement>(null),textarea=useRef<HTMLTextAreaElement>(null),dialog=useRef<HTMLDialogElement>(null),composer=useRef<HTMLFormElement>(null);
  const listPage=useRef<HTMLDivElement>(null),detailPage=useRef<HTMLDivElement>(null),contextAnchor=useRef<DOMRect|null>(null);
  const captureList=useListMotion(listView,conversationStates);
  const openContext=(key:string,anchor?:DOMRect)=>{contextAnchor.current=anchor||null;setContextKey(key)};
  const listScroll=useRef(0),nearBottom=useRef(true),thread=useRef<string|null>(null);
  const pendingAnchor=useRef<{el:HTMLElement,top:number,height:number}|null>(null);
- useLayoutEffect(()=>{const el=textarea.current;if(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,128)+'px'}},[draft,screen]);
+ useLayoutEffect(()=>{const el=textarea.current;if(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,128)+'px'}},[draft,screen,paired]);
+ useLayoutEffect(()=>{
+  const messages=chatView.current,form=composer.current;if(!messages||!form)return;
+  let lastHeight=-1;
+  const fit=()=>{const height=Math.ceil(form.getBoundingClientRect().height);if(height!==lastHeight){lastHeight=height;messages.style.setProperty('--composer-space',`${height+8}px`)}if(nearBottom.current)messages.scrollTop=messages.scrollHeight};
+  fit();const observer=new ResizeObserver(fit);observer.observe(form,{box:'border-box'});observer.observe(messages,{box:'border-box'});return()=>observer.disconnect();
+ },[screen,paired]);
  useLayoutEffect(()=>{if(screen==='messages'&&listView.current)listView.current.scrollTop=listScroll.current},[screen]);
  useLayoutEffect(()=>{const el=chatView.current;if(!el)return;if(thread.current!==active||nearBottom.current)el.scrollTop=el.scrollHeight;thread.current=active},[active,current.length,screen]);
  useLayoutEffect(()=>{const anchor=pendingAnchor.current;if(anchor?.el.isConnected)anchor.el.scrollTop=anchor.top+anchor.el.scrollHeight-anchor.height;pendingAnchor.current=null},[rows]);
@@ -208,9 +213,9 @@ function App(){
     </article></React.Fragment>})}
    <div ref={end}/>
   </section>
-  <form className="composer" onSubmit={e=>{e.preventDefault();nearBottom.current=true;void send()}}>
+  <form className="composer" ref={composer} onSubmit={e=>{e.preventDefault();nearBottom.current=true;void send()}}>
    <label className="sim-control">发送线路 <select aria-label="发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!sims.length&&<option value="">无可用 SIM</option>}{sims.map(s=><option value={s.id} key={s.id}>{s.name} · SIM {s.id}</option>)}</select></label>
-   {draft.length>2000&&<p className="draft-limit">超过 2000 字，请删减后发送（当前 {draft.length} 字）</p>}<div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder="短信 · SMS" value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||draft.length>2000||!sim||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
+   {draft.length>2000&&<p className="draft-limit">超过 2000 字，请删减后发送（当前 {draft.length} 字）</p>}<div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder={'短信 · '+(sims.find(s=>String(s.id)===sim)?.name||'SMS')} onPointerDown={e=>{if(e.pointerType==='touch'&&document.activeElement!==e.currentTarget)e.currentTarget.focus({preventScroll:true})}} value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||draft.length>2000||!sim||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
   </form>
  </div>}
  {screen==='settings'&&<header className="settings-header"><button className="glass circle" aria-label="返回信息列表" onClick={back}><Icon name="back"/></button><strong>设置</strong><span className="header-spacer"/></header>}

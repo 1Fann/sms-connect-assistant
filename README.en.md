@@ -4,7 +4,7 @@
 
 Use your own Android phone as an SMS endpoint and read, receive, and send messages from an iPhone Home Screen web app. A single APK contains the HTTPS server and web interface; no continuously running computer is required.
 
-**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.7.0-candidate**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
+**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.7.1-candidate**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
@@ -12,6 +12,7 @@ Use your own Android phone as an SMS endpoint and read, receive, and send messag
 
 - iPhone PWA with message lists, conversations, contact search, dual-SIM selection, sending status, and light/dark themes.
 - Refined against a native Messages recording: a centered title, circular swipe actions, centered pins, floating search/compose, and grouped bubbles. Long-press opens a conversation preview with a separate menu; previewing does not mark messages read. Web materials still differ from native rendering.
+- Keyboard layout keeps a stable shell while the chat area separately avoids the keyboard. The floating composer removes duplicate bottom safe-area spacing; bottom-following and older-message reading positions are preserved, including multiline input. Viewport simulations pass; physical iPhone keyboard animation still needs device verification.
 - Android default SMS app mode handles text messages and system SMS database records. Ordinary operation does not require Root.
 - On the tested Redmi / MIUI 14 device, setting the app as the default SMS handler and granting permissions avoids per-message Android confirmation while keeping MIUI optimization enabled. Other ROMs require testing.
 - HTTPS, Android-side pairing approval, device revocation, session rotation, and idempotent requests. Unknown outcomes are not automatically resent as new requests; gateway acceptance does not mean delivery.
@@ -66,7 +67,7 @@ For a signed release set `SIGNING_STORE_FILE` (absolute path to your private key
 
 A desktop regression with 1,000 messages and a 200-message conversation reduced React commits during 36 timestamp drag moves from 32 to 0. Edge-back cancellation, interrupted gestures, previews, and failed-save rollback are covered. These checks do not measure iPhone frame rates.
 
-- This version passed a local build, 124 Android unit tests, 26 frontend tests, and mocked browser flows. Mock tests do not send SMS.
+- This version passed a local build, 124 Android unit tests, 35 frontend tests, and mocked browser flows. Mock tests do not send SMS.
 - Earlier versions verified dual-SIM discovery, real SMS sending/receiving, an iPhone test notification, and public IPv6 access on one Redmi / Android 13 / MIUI 14 device. Version 0.3.0 verified Root recovery after force-stop, respecting manual stop, and disabling the watchdog without stopping SMS service. Version 0.3.1 mainly renames the application and removes personal defaults from public source.
 - Local HTTPS health does not prove internet reachability or carrier delivery. Non-Root background fallback checks have a 15-minute minimum and may be delayed; they cannot bypass force-stop. Root protection is not a guarantee of permanent availability.
 - The certificate job checks daily and attempts renewal within 30 days of expiry. Real expiry-driven renewal, long-term locked-screen operation, watchdog startup after a full reboot, and other ROMs still need validation.

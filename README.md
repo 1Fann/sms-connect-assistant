@@ -4,13 +4,14 @@
 
 让自己的 Android 手机作为短信终端，在 iPhone 的主屏幕网页应用中查看、接收和发送短信。单个 APK 内置 HTTPS 服务和网页，不需要电脑持续运行。
 
-**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.3.1-candidate**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
+**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.4.0-candidate**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
 ## 功能
 
 - iPhone PWA：短信列表、会话、联系人搜索、双 SIM 线路选择、发送状态和深浅色界面。
+- 0.4.0 按 iOS 27“信息”布局重新设计：底部悬浮搜索、新建、未读筛选、玻璃工具栏及分组气泡；为 iOS 27.2 优化，网页版材质与系统原生仍有差异。
 - 默认短信应用模式：Android 负责文字短信收发及系统短信库记录；普通功能不依赖 Root。
 - 在已测试的 Redmi / MIUI 14 上，保持 MIUI 优化开启、设为默认短信应用并正确授权后，iPhone 发送不再要求 Android 逐条确认。其他 ROM 需要实测。
 - HTTPS 访问、Android 端配对确认、设备撤销、会话轮换及请求幂等处理。未知发送结果不会自动换新请求重发；“网关已接受”不等于实际送达。
@@ -58,7 +59,7 @@ pnpm build
 
 ## 验证与限制
 
-- 此版本本机构建、115 项 Android 单元测试、8 项前端测试和模拟浏览器流程通过；模拟测试不会发真实短信。
+- 此版本本机构建、115 项 Android 单元测试、11 项前端测试和模拟浏览器流程通过；模拟测试不会发真实短信。
 - 前一版本在一台 Redmi / Android 13 / MIUI 14 上验证了双卡识别、真实收发、iPhone 测试通知和公网 IPv6 访问。0.3.0 验证了强行停止后 Root 拉起、手动关闭不拉起及关闭守护不影响短信服务。0.3.1 主要改名和清理公开默认配置。
 - 本机 HTTPS 健康不等于公网必达或运营商送达。无 Root 的后台补检最短 15 分钟，可能受系统延迟；不能突破强行停止。Root 守护也不能保证永不失效。
 - 续期任务每天检查证书并在到期前 30 天尝试续期；真实到期续签、长期锁屏、整机重启后守护和其他 ROM 仍需继续验收。

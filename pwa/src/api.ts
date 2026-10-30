@@ -11,4 +11,4 @@ export async function api<T>(path:string,body?:unknown,retry=true):Promise<T>{
   if(!r.ok)throw new ApiError(r.status,({401:'会话已失效，请重新配对',403:'操作未获授权，请检查安卓权限或配对码',429:'操作过于频繁，请稍后再试'} as Record<number,string>)[r.status] || '网关操作失败');
   return r.json();
 }
-export const stateLabel:Record<State,string>={local:'本地待提交',accepted:'网关已接受',sent:'运营商发送成功',delivered:'已送达',failed:'发送失败',unknown:'状态未知，请先核实',received:''};
+export const stateLabel:Record<State,string>={local:'本地待提交',accepted:'网关已接受',sent:'已发送',delivered:'已送达',failed:'发送失败',unknown:'状态未知，请先核实',received:''};

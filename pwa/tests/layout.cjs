@@ -30,7 +30,8 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await page.getByLabel('筛选与设置').click();await page.getByRole('menuitemradio',{name:/未读信息/}).click();assert.equal(await page.locator('.conversation').count(),4);
  await page.getByLabel('筛选与设置').click();await page.getByRole('menuitemradio',{name:'所有信息'}).click();
  await page.getByLabel('搜索信息').fill('咖啡店');assert.equal(await page.locator('.conversation').count(),1);await page.getByLabel('清除搜索').click();
- await page.getByText('小林',{exact:true}).click();await page.getByText('好呀，一会儿见！',{exact:true}).waitFor();
+ await page.getByText('小林',{exact:true}).click();await page.locator('.messages').getByText('好呀，一会儿见！',{exact:true}).waitFor();
+ await page.waitForFunction(()=>Math.abs(new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.chat-page')).transform).m41)<.1);
  assert.equal(await page.locator('.bubble.tail').count(),4);assert.equal(await page.locator('.date-divider').count(),1);
  await page.screenshot({animations:"disabled",path:path.join(out,'chat-light.png')});
  await page.getByLabel('短信内容',{exact:true}).fill('测试草稿，不会发送');await page.getByLabel('发送线路',{exact:true}).selectOption('2');assert.equal(await page.getByLabel('发送线路',{exact:true}).inputValue(),'2');
@@ -41,7 +42,7 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await page.emulateMedia({colorScheme:'dark'});await page.screenshot({animations:"disabled",path:path.join(out,'chat-dark.png')});
  await page.getByLabel('短信选项',{exact:true}).click();await page.getByRole('dialog').waitFor();await page.getByLabel('选项中的发送线路').selectOption('1');await page.getByRole('button',{name:'完成',exact:true}).click();
  assert.equal(await page.getByLabel('发送线路',{exact:true}).inputValue(),'1');
- await page.getByLabel('返回信息列表').click();await page.screenshot({animations:"disabled",path:path.join(out,'conversations-dark.png')});
+ await page.getByLabel('返回信息列表').click();await page.locator('.chat-page').waitFor({state:'detached'});await page.screenshot({animations:"disabled",path:path.join(out,'conversations-dark.png')});
  await page.getByRole('button',{name:'编辑',exact:true}).click();await page.getByRole('menuitem',{name:'选择信息',exact:true}).click();await page.getByRole('button',{name:'全选',exact:true}).click();await page.getByRole('button',{name:/标为已读/}).click();await page.getByRole('button',{name:'编辑',exact:true}).waitFor();assert.ok(reads>=8);
  await page.getByLabel('新建短信').click();await page.getByLabel('收件人号码').fill('+12025550123');await page.getByLabel('短信内容',{exact:true}).fill('多行\n测试草稿');
  for(const viewport of [{width:375,height:667},{width:430,height:932},{width:667,height:375}]){await page.setViewportSize(viewport);await page.waitForFunction(()=>Math.abs(document.querySelector("main").getBoundingClientRect().height-innerHeight)<2);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);const b=await page.locator('.composer').boundingBox();assert.ok(b.y+b.height<=viewport.height+1)}

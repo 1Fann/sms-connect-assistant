@@ -11,6 +11,7 @@ import {mergeOutgoing} from './outgoing';
 import {isRemoved,isUnread,type ConversationState} from './conversations';
 import {ConversationGesture,Pinned} from './ConversationGesture';
 import {useDialogMotion} from './motion';
+import {MessageBubble} from './MessageBubble';
 
 function App(){
  const [paired,setPaired]=useState(false),[pairing,setPairing]=useState(false),[code,setCode]=useState('');
@@ -26,7 +27,7 @@ function App(){
  const meta=new Map(conversationStates.map(s=>[s.address,s]));
  async function changeConversation(address:string,action:string){
   generation.current++;metadataWrites.current++;
-  try{const result=await api<ConversationState[]>('conversations',{address,action});setConversationStates(result);setMetadataReady(true)}finally{metadataWrites.current--;generation.current++}
+  try{const result=await api<ConversationState[]>('conversations',{address,action,region});setConversationStates(result);setMetadataReady(true)}finally{metadataWrites.current--;generation.current++}
  }
  async function subscribe(){
   try{
@@ -94,6 +95,10 @@ function App(){
   catch(e){setOutgoing(p=>mergeOutgoing(p,[{...m,state:'unknown'}]));fail(e)}finally{sending.current=false;setBusy(false);void refresh()}
  }
  const [filter,setFilter]=useState<'all'|'unread'|'deleted'>('all'),[menu,setMenu]=useState(false),[editing,setEditing]=useState(false);
+ const requestPinEdit=useRef(false);
+ const [editMenu,setEditMenu]=useState(false),[pinEditing,setPinEditing]=useState(false);
+ const [messageMenu,setMessageMenu]=useState<Sms|null>(null),[messageError,setMessageError]=useState(''),[notice,setNotice]=useState(''),[timeDrag,setTimeDrag]=useState(0);
+ const messageDialog=useRef<HTMLDialogElement>(null),lastMessage=useRef<Sms|null>(null);if(messageMenu)lastMessage.current=messageMenu;
  const [swiped,setSwiped]=useState<string|null>(null),[contextKey,setContextKey]=useState<string|null>(null),[deleteKeys,setDeleteKeys]=useState<string[]>([]);
  const actionDialog=useRef<HTMLDialogElement>(null),deleteDialog=useRef<HTMLDialogElement>(null);
  const lastContext=useRef<string|null>(null);if(contextKey)lastContext.current=contextKey;
@@ -105,10 +110,12 @@ function App(){
  useLayoutEffect(()=>{if(screen==='messages'&&listView.current)listView.current.scrollTop=listScroll.current},[screen]);
  useLayoutEffect(()=>{const el=chatView.current;if(!el)return;if(thread.current!==active||nearBottom.current)el.scrollTop=el.scrollHeight;thread.current=active},[active,current.length,screen]);
  useLayoutEffect(()=>{const anchor=pendingAnchor.current;if(anchor?.el.isConnected)anchor.el.scrollTop=anchor.top+anchor.el.scrollHeight-anchor.height;pendingAnchor.current=null},[rows]);
+ useEffect(()=>{if(!notice)return;const t=setTimeout(()=>setNotice(''),1800);return()=>clearTimeout(t)},[notice]);
+ const messageMotion=useDialogMotion(!!messageMenu,messageDialog,()=>setMessageMenu(null));
  const optionsMotion=useDialogMotion(sheet,dialog,()=>setSheet(false),true);
  const contextMotion=useDialogMotion(!!contextKey,actionDialog,()=>setContextKey(null));
  const deleteMotion=useDialogMotion(!!deleteKeys.length,deleteDialog,()=>{if(!busy)setDeleteKeys([])},true);
- useEffect(()=>{setSwiped(null);setSelected(new Set());setEditing(false)},[filter]);
+ useEffect(()=>{setSwiped(null);setSelected(new Set());setEditing(false);setPinEditing(requestPinEdit.current);requestPinEdit.current=false;setEditMenu(false)},[filter]);
  const deleted=conversationStates.filter(s=>s.removedBefore>0).map(s=>({key:s.address,items:reconciled.filter(m=>identity(m.address,region)===s.address&&isRemoved(m,s)).sort((a,b)=>a.date-b.date)}));
  const source=filter==='deleted'?deleted:list;
  const visible=source.filter(c=>(filter!=='unread'||isUnread(c.items,meta.get(c.key)))&&(!search||`${c.key} ${c.items.map(m=>`${m.name||''} ${m.address} ${m.body}`).join(' ')}`.toLowerCase().includes(search.toLowerCase())));
@@ -117,8 +124,8 @@ function App(){
  const unreadCount=list.filter(c=>isUnread(c.items,meta.get(c.key))).length;
  const contextItems=source.find(c=>c.key===(contextKey||lastContext.current))?.items||[],contextName=contextItems.find(m=>m.name)?.name||formatPhone(contextKey||lastContext.current||'',region);
  const lastOutgoing=current.map(m=>m.incoming).lastIndexOf(false);
- const back=()=>{setSheet(false);setMenu(false);setActive(null);setScreen('messages');setError('')};
- const newMessage=()=>{setActive(null);setRecipient('');setDraft('');setScreen('new');setError('');setMenu(false)};
+ const back=()=>{setSheet(false);setMessageMenu(null);setTimeDrag(0);setMenu(false);setEditMenu(false);setActive(null);setScreen('messages');setError('')};
+ const newMessage=()=>{setActive(null);setRecipient('');setDraft('');setScreen('new');setError('');setMenu(false);setEditMenu(false);setPinEditing(false)};
  async function markSelected(){
   if(busy||mutation.current)return;mutation.current=true;setBusy(true);
   try{for(const key of selected){const c=list.find(c=>c.key===key);if(!c)continue;const last=c.items.at(-1)!;
@@ -141,18 +148,19 @@ function App(){
  {!paired?<section className="pair"><div className="app-icon"><Icon name="compose" size={40}/></div><h1>你的短信，随身相伴。</h1><p>连接自己的 Android 手机<br/>在 iPhone 上安全收发短信</p><form onSubmit={async e=>{e.preventDefault();setError('');try{await api('pair',{code,name:'iPhone Safari'});setPairing(true)}catch(e){fail(e)}}}><label>安卓显示的配对码<input value={code} onChange={e=>setCode(e.target.value.trim())} autoComplete="off" autoCapitalize="none" required maxLength={12}/></label><button className="primary" disabled={pairing}>{pairing?'请在安卓确认授权…':'连接我的手机'}</button></form><p className="hint">Safari → 分享 → 添加到主屏幕<br/>只使用你自己的 HTTPS 网址</p></section>:<>
  {screen==='messages'&&<>
   <div className="list-view" ref={listView} onScroll={e=>{listScroll.current=e.currentTarget.scrollTop;setSwiped(null)}}>
-   <header className="list-toolbar"><button className="glass edit-button" onClick={()=>{setEditing(v=>!v);setSelected(new Set());setMenu(false)}}>{editing?'完成':'编辑'}</button><button className="glass circle" aria-label="筛选与设置" aria-expanded={menu} onClick={()=>setMenu(v=>!v)}><Icon name="filter"/></button></header>
+   <header className="list-toolbar"><button className="glass edit-button" aria-expanded={editMenu} onClick={()=>{if(editing||pinEditing){setEditing(false);setPinEditing(false)}else setEditMenu(v=>!v);setSelected(new Set());setMenu(false);setSwiped(null)}}>{editing||pinEditing?'完成':'编辑'}</button><button className={'glass circle'+(filter==='unread'?' active-filter':'')} aria-label="筛选与设置" aria-expanded={menu} onClick={()=>{setMenu(v=>!v);setEditMenu(false);setSwiped(null)}}><Icon name="filter"/></button></header>
    <h1 className="list-title">{filter==='unread'?'未读信息':filter==='deleted'?'最近删除':'信息'}</h1>
    {!online&&<button className="offline-banner" onClick={()=>void refresh()}>连接已中断 · 轻点重试</button>}
    {filter==='deleted'&&<p className="deleted-note">仅从助手移除，安卓原始短信仍保留。选择对话可恢复；新短信会正常出现在信息列表中。</p>}
-   {!!pins.length&&<section className="pinned-grid" aria-label="置顶会话">{pins.map(c=>{const m=c.items.at(-1),name=m?.name||formatPhone(m?.address||c.key,region),unread=isUnread(c.items,meta.get(c.key));return <Pinned key={c.key} name={name} avatar={m?.name} unread={unread} onOpen={()=>selectConversation(c.key)} onMenu={()=>setContextKey(c.key)}/>})}</section>}
-   <section className="conversations" aria-label="会话列表">{regular.map(c=>{const m=c.items.at(-1),unread=filter!=='deleted'&&isUnread(c.items,meta.get(c.key)),name=m?.name||formatPhone(m?.address||c.key,region);return <ConversationGesture key={c.key} label={`${name}${unread?'，未读':''}`} unread={unread} disabled={editing||filter==='deleted'||busy} open={swiped===c.key} onSwipe={open=>setSwiped(open?c.key:null)} onOpen={()=>selectConversation(c.key)} onMenu={()=>setContextKey(c.key)} onDelete={()=>setDeleteKeys([c.key])} onRead={()=>void act([c.key],unread?'read':'unread')}>
-    {editing?<span className={'selection-dot '+(selected.has(c.key)?'selected':'')}>{selected.has(c.key)&&<Icon name="check" size={15}/>}</span>:<span className={'unread-dot '+(unread?'unread':'')}/>}
-    <Avatar name={m?.name}/><span className="preview"><span className="row-heading"><b>{name}</b>{!!meta.get(c.key)?.pinned&&<Icon name="pin" size={13}/>}<time>{m?listTime(m.date):''}</time><Icon name="chevron" size={12}/></span><span className="snippet">{filter==='deleted'?'已从助手移除 · 轻点恢复':<>{m?.state==='failed'&&!m.incoming?'未发送：':''}{m?.body}</>}</span></span>
+   {!!pins.length&&<section className="pinned-grid" aria-label="置顶会话">{pins.map(c=>{const m=c.items.at(-1),name=m?.name||formatPhone(m?.address||c.key,region),unread=isUnread(c.items,meta.get(c.key));return <div className="pinned-cell" key={c.key}>{pinEditing&&<button className="unpin-control" aria-label={'取消置顶'+name} disabled={busy} onClick={()=>void act([c.key],'unpin')}><Icon name="minus" size={18}/></button>}<Pinned name={name} avatar={m?.name} unread={unread} muted={!!meta.get(c.key)?.muted} onOpen={()=>{if(!pinEditing)selectConversation(c.key)}} onMenu={()=>{if(!pinEditing)setContextKey(c.key)}}/></div>})}</section>}
+   <section className="conversations" aria-label="会话列表">{regular.map(c=>{const m=c.items.at(-1),unread=filter!=='deleted'&&isUnread(c.items,meta.get(c.key)),name=m?.name||formatPhone(m?.address||c.key,region);return <ConversationGesture key={c.key} label={`${name}${unread?'，未读':''}${meta.get(c.key)?.muted?'，已隐藏提醒':''}`} unread={unread} muted={!!meta.get(c.key)?.muted} selected={editing?selected.has(c.key):undefined} onMute={()=>void act([c.key],meta.get(c.key)?.muted?'unmute':'mute')} disabled={editing||pinEditing||filter==='deleted'||busy} open={swiped===c.key} onSwipe={open=>setSwiped(open?c.key:null)} onOpen={()=>{if(pinEditing)void act([c.key],'pin');else selectConversation(c.key)}} onMenu={()=>setContextKey(c.key)} onDelete={()=>setDeleteKeys([c.key])} onRead={()=>void act([c.key],unread?'read':'unread')}>
+    {pinEditing?<span className="pin-control"><Icon name="pin" size={20}/></span>:editing?<span className={'selection-dot '+(selected.has(c.key)?'selected':'')}>{selected.has(c.key)&&<Icon name="check" size={15}/>}</span>:<span className={'unread-dot '+(unread?'unread':'')}/>}
+    <Avatar name={m?.name}/><span className="preview"><span className="row-heading"><b>{name}</b>{meta.get(c.key)?.muted&&<span className="muted-mark" aria-label="已隐藏提醒"><Icon name="bell-off" size={14}/></span>}{!!meta.get(c.key)?.pinned&&<Icon name="pin" size={13}/>}<time>{m?listTime(m.date):''}</time><Icon name="chevron" size={12}/></span><span className="snippet">{filter==='deleted'?'已从助手移除 · 轻点恢复':<>{m?.state==='failed'&&!m.incoming?'未发送：':''}{m?.body}</>}</span></span>
    </ConversationGesture>})}</section>
    {!visible.length&&!pins.length&&<div className="empty">{!metadataReady?'正在载入…':search?'未找到信息':filter==='unread'?'没有未读信息':filter==='deleted'?'没有最近删除的对话':'还没有信息'}<small>{search?'试试其他姓名、号码或关键词':filter==='deleted'?'移除的对话会保留在这里，直到你恢复':'新收到的短信会显示在这里'}</small></div>}
    {cursor&&<button className="load-more" onClick={()=>void refresh(true)}>加载更早的短信</button>}
   </div>
+  {editMenu&&<><button className="menu-scrim" aria-label="关闭编辑菜单" onClick={()=>setEditMenu(false)}/><div className="filter-menu edit-menu glass" role="menu"><button role="menuitem" onClick={()=>{setEditing(true);setEditMenu(false);setSelected(new Set())}}>选择信息<Icon name="check" size={18}/></button>{filter!=='deleted'&&<button role="menuitem" onClick={()=>{requestPinEdit.current=filter!=='all';setFilter('all');setPinEditing(true);setEditMenu(false)}}>编辑置顶<Icon name="pin" size={18}/></button>}</div></>}
   {menu&&<><button className="menu-scrim" aria-label="关闭筛选菜单" onClick={()=>setMenu(false)}/><div className="filter-menu glass" role="menu">
    <button role="menuitemradio" aria-checked={filter==='all'} onClick={()=>{setFilter('all');setMenu(false)}}>所有信息{filter==='all'&&<Icon name="check" size={18}/>}</button>
    <button role="menuitemradio" aria-checked={filter==='unread'} onClick={()=>{setFilter('unread');setMenu(false)}}>未读信息<span>{unreadCount}</span></button>
@@ -160,20 +168,20 @@ function App(){
    <button role="menuitem" onClick={()=>{setMenu(false);void refresh()}}>刷新信息<Icon name="refresh" size={18}/></button>
    <button role="menuitem" onClick={()=>{setMenu(false);setScreen('settings')}}>设置<Icon name="settings" size={18}/></button>
   </div></>}
-  {editing?<nav className="list-dock editing-dock glass"><button onClick={()=>setSelected(new Set(visible.map(c=>c.key)))}>全选</button>{filter==='deleted'?<button disabled={!selected.size||busy} onClick={()=>void act([...selected],'restore')}>恢复{selected.size?`（${selected.size}）`:''}</button>:<><button disabled={!selected.size||busy} onClick={()=>void markSelected()}>标为已读{selected.size?`（${selected.size}）`:''}</button><button className="destructive" disabled={!selected.size||busy} onClick={()=>setDeleteKeys([...selected])}>删除</button></>}</nav>:
+  {editing?<nav className="list-dock editing-dock glass"><button onClick={()=>setSelected(new Set(visible.map(c=>c.key)))}>全选</button>{filter==='deleted'?<button disabled={!selected.size||busy} onClick={()=>void act([...selected],'restore')}>恢复{selected.size?`（${selected.size}）`:''}</button>:<><button disabled={!selected.size||busy} onClick={()=>{if([...selected].some(key=>isUnread(list.find(c=>c.key===key)?.items||[],meta.get(key))))void markSelected();else void act([...selected],'unread')}}>{[...selected].some(key=>isUnread(list.find(c=>c.key===key)?.items||[],meta.get(key)))?'标为已读':'标为未读'}{selected.size?`（${selected.size}）`:''}</button><button className="destructive" disabled={!selected.size||busy} onClick={()=>setDeleteKeys([...selected])}>删除</button></>}</nav>:
    <nav className="list-dock" aria-label="信息工具栏"><label className="search glass"><Icon name="search" size={21}/><input aria-label="搜索信息" placeholder="搜索" value={search} onChange={e=>setSearch(e.target.value)}/>{search&&<button aria-label="清除搜索" onClick={()=>setSearch('')}><Icon name="close" size={16}/></button>}</label><button className="glass circle compose-button" aria-label="新建短信" onClick={newMessage}><Icon name="compose" size={23}/></button></nav>}
  </>}
  {(screen==='chat'||screen==='new')&&<>
   {screen==='chat'?<header className="chat-header"><button className="glass circle back" aria-label="返回信息列表" onClick={back}><Icon name="back"/></button><button className="contact-heading" aria-label="联系人与发送线路" onClick={()=>setSheet(true)}><Avatar name={current.find(m=>m.name)?.name} large/><span className="contact-title glass">{title}<Icon name="chevron" size={10}/></span></button></header>:
    <><header className="new-header"><button className="glass circle" aria-label="取消新信息" onClick={back}><Icon name="close"/></button><strong>新信息</strong><span className="header-spacer"/></header><div className="recipient"><label>收件人：<input aria-label="收件人号码" type="tel" placeholder="姓名或电话号码" value={recipient} onChange={e=>setRecipient(e.target.value)}/></label>{recipient&&<small>{formatPhone(recipient,region)}</small>}</div></>}
-  <section className="messages" ref={chatView} aria-label="短信内容列表" onScroll={e=>{const el=e.currentTarget;nearBottom.current=el.scrollHeight-el.scrollTop-el.clientHeight<70}}>
+  <section className={'messages'+(timeDrag?' showing-times':'')} style={{'--time-drag':`${timeDrag}px`,'--time-opacity':timeDrag/70} as React.CSSProperties} ref={chatView} aria-label="短信内容列表" onScroll={e=>{const el=e.currentTarget;nearBottom.current=el.scrollHeight-el.scrollTop-el.clientHeight<70}}>
    {screen==='new'&&contacts.map(c=><button className="contact-suggestion" key={c.number+c.name} onClick={()=>setRecipient(c.number)}><Avatar name={c.name}/><span>{c.name}<small>{formatPhone(c.number,region)}</small></span></button>)}
    {cursor&&screen==='chat'&&<button className="load-more" onClick={()=>{nearBottom.current=false;void refresh(true)}}>加载更早的短信</button>}
    {screen==='chat'&&<p className="sms-heading">短信 · SMS</p>}
    {current.map((m,i)=>{const tail=groupEnd(m,current[i+1]),stamp=showDate(m,current[i-1]);return <React.Fragment key={m.id}>
     {stamp&&<time className="date-divider" dateTime={new Date(m.date).toISOString()}>{sectionTime(m.date)}</time>}
     <article className={(m.incoming?'incoming':'outgoing')+(tail?' group-end':'')+(i>0&&m.incoming!==current[i-1].incoming?' new-sender':'')}>
-     <p className={'bubble'+(tail?' tail':'')} tabIndex={0} role="button" aria-expanded={details===m.id} title="轻点查看时间与线路" onClick={()=>setDetails(details===m.id?null:m.id)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setDetails(details===m.id?null:m.id)}}}>{m.body}</p>
+     <MessageBubble body={m.body} tail={tail} expanded={details===m.id} onDetails={()=>setDetails(details===m.id?null:m.id)} onMenu={()=>{setMessageError('');setMessageMenu(m)}} onTimeDrag={setTimeDrag}/><time className="drag-time" aria-hidden={!timeDrag}>{new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}).format(m.date)}</time>
      {details===m.id&&<small className="message-details">{sectionTime(m.date)} · {m.sim?`SIM ${m.sim}`:'线路未知'}{!m.incoming?' · '+stateLabel[m.state]:''}</small>}
      {!m.incoming&&(i===lastOutgoing||['failed','unknown','accepted','local'].includes(m.state))&&<small className={'delivery '+(m.state==='failed'?'failed':'')}>{stateLabel[m.state]}{m.error&&<> · {m.error}</>}</small>}
      {!m.incoming&&m.state==='unknown'&&outgoing.some(o=>o.id===m.id)&&<button className="retry" disabled={busy} onClick={()=>void send(m)}>核对 / 重试同一请求</button>}
@@ -183,17 +191,26 @@ function App(){
   </section>
   <form className="composer" onSubmit={e=>{e.preventDefault();nearBottom.current=true;void send()}}>
    <label className="sim-control">发送线路 <select aria-label="发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!sims.length&&<option value="">无可用 SIM</option>}{sims.map(s=><option value={s.id} key={s.id}>{s.name} · SIM {s.id}</option>)}</select></label>
-   <div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder="短信 · SMS" value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||!sim||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
+   {draft.length>2000&&<p className="draft-limit">超过 2000 字，请删减后发送（当前 {draft.length} 字）</p>}<div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder="短信 · SMS" value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||draft.length>2000||!sim||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
   </form>
  </>}
  {screen==='settings'&&<header className="settings-header"><button className="glass circle" aria-label="返回信息列表" onClick={back}><Icon name="back"/></button><strong>设置</strong><span className="header-spacer"/></header>}
  {screen==='settings'&&<section className="settings"><h1>短信互联助手</h1><div className="card"><h3>号码显示</h3><label>本地号码地区<select value={region} onChange={e=>{setRegion(e.target.value as CountryCode);localStorage.setItem('sms.region',e.target.value)}}>{getCountries().map(r=><option value={r} key={r}>{new Intl.DisplayNames(['zh-CN'],{type:'region'}).of(r)} ({r})</option>)}</select></label><p>国际号码按国家码分段；没有国家码时使用此地区。号码库随应用离线提供。</p></div><div className="card"><h3>SIM 卡</h3>{sims.map(s=><label key={s.id}>SIM {s.id}<input defaultValue={s.name} maxLength={30} onBlur={e=>{const name=e.target.value;api('sims',{id:String(s.id),name}).then(()=>setSims(p=>p.map(x=>x.id===s.id?{...x,name}:x))).catch(fail)}}/></label>)}</div><div className="card"><h3>连接状态</h3><button onClick={()=>api('status').then(r=>setDiagnostic(JSON.stringify(r,null,2))).catch(fail)}>检查网关</button><pre>{diagnostic}</pre><p>无法连接时请检查证书、DDNS、路由器防火墙，以及 iPhone 当前网络是否支持 IPv6。浏览器无法单独确认是哪一项故障。</p></div><div className="card"><h3>通知</h3><p>默认只显示“收到一条新短信”，不会发送短信正文或完整号码。依赖 Apple 推送服务，可能延迟；点击通知打开会话列表。</p><p role="status">{pushStatus}</p><button onClick={()=>void subscribe()}>开启 / 重新订阅通知</button><button onClick={()=>api<{status:string}>('push/test',{}).then(r=>setPushStatus(r.status)).catch(fail)}>发送测试通知</button><button onClick={()=>api<{status:string}>('push/status').then(r=>setPushStatus(r.status)).catch(fail)}>查看提交结果</button><button onClick={()=>setPushStatus('用户已确认：此设备收到通知')}>我已收到通知</button><button onClick={async()=>{try{await api('push/unsubscribe',{});const r=await navigator.serviceWorker.ready;await(await r.pushManager.getSubscription())?.unsubscribe();setPushStatus('已关闭通知')}catch(e){fail(e)}}}>关闭通知</button></div><div className="card"><h3>隐私</h3><p>不持久保存短信正文或认证密钥。仅缓存界面资源；访问凭证 12 小时轮换，30 天未使用需重新配对。HTTPS 保护访问链路，普通短信不具备端到端加密。</p><button onClick={async()=>{await Promise.all((await caches.keys()).map(k=>caches.delete(k)));localStorage.removeItem('sms.region');setRows([]);setOutgoing([]);setError('本地缓存已清除')}}>清除本地缓存</button><button onClick={()=>api('logout',{}).then(()=>{setPaired(false);setRows([]);setOutgoing([])}).catch(fail)}>退出此设备</button></div></section>}
 
+ {notice&&<div className="toast glass" role="status">{notice}</div>}
+ <dialog ref={messageDialog} className="conversation-menu message-menu" aria-label="信息操作" {...messageMotion}>
+  <div className="context-preview"><p>{(messageMenu||lastMessage.current)?.body}</p></div>
+  <button onClick={()=>{const body=messageMenu?.body;if(body===undefined)return;if(!navigator.clipboard){setMessageError('无法访问剪贴板，请选择下面的文字拷贝');return}navigator.clipboard.writeText(body).then(()=>{setMessageMenu(null);setNotice('已拷贝')}).catch(()=>setMessageError('无法拷贝，请选择下面的文字拷贝'))}}>拷贝<Icon name="copy"/></button>
+  <button onClick={()=>{const m=messageMenu;if(!m)return;setMessageMenu(null);newMessage();setDraft(m.body)}}>转发<Icon name="forward"/></button>
+  {messageError&&<><p className="dialog-error">{messageError}</p><textarea className="copy-fallback" aria-label="选择信息文本" readOnly value={messageMenu?.body||''} onFocus={e=>e.currentTarget.select()}/></>}
+  <button className="context-cancel" onClick={()=>setMessageMenu(null)}>取消</button>
+ </dialog>
  <dialog ref={actionDialog} className="conversation-menu" aria-label="对话操作" {...contextMotion}>
   <div className="context-preview"><Avatar name={contextItems.find(m=>m.name)?.name} large/><h2>{contextName}</h2><p>{filter==='deleted'?'已从助手移除':contextItems.at(-1)?.body}</p></div>
   {filter==='deleted'?<button disabled={busy} onClick={()=>void act([contextKey!],'restore')}>恢复对话<Icon name="restore"/></button>:<>
    <button disabled={busy} onClick={()=>void act([contextKey!],meta.get(contextKey!)?.pinned?'unpin':'pin')}>{meta.get(contextKey!)?.pinned?'取消置顶':'置顶'}<Icon name="pin"/></button>
    <button disabled={busy} onClick={()=>void act([contextKey!],isUnread(contextItems,meta.get(contextKey!))?'read':'unread')}>{isUnread(contextItems,meta.get(contextKey!))?'标为已读':'标为未读'}<Icon name="envelope"/></button>
+   <button disabled={busy} onClick={()=>void act([contextKey!],meta.get(contextKey!)?.muted?'unmute':'mute')}>{meta.get(contextKey!)?.muted?'显示提醒':'隐藏提醒'}<Icon name={meta.get(contextKey!)?.muted?'bell':'bell-off'}/></button>
    <button disabled={busy} className="destructive" onClick={()=>{setDeleteKeys([contextKey!]);setContextKey(null)}}>删除<Icon name="trash"/></button>
   </>}
   {error&&<p role="alert" className="dialog-error">{error}</p>}<button className="context-cancel" onClick={()=>setContextKey(null)}>取消</button>
@@ -203,7 +220,7 @@ function App(){
  </dialog>
  <dialog ref={dialog} className="options-sheet" {...optionsMotion}>
   <div className="sheet-content"><button className="sheet-close circle" aria-label="关闭短信选项" onClick={()=>setSheet(false)}><Icon name="close" size={20}/></button><Avatar name={current.find(m=>m.name)?.name} large/><h2>{screen==='chat'?title:'短信选项'}</h2>
-  {screen==='chat'&&<p>{formatPhone(active||'',region)}</p>}<label className="sheet-line">发送线路<select aria-label="选项中的发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!sims.length&&<option value="">无可用 SIM</option>}{sims.map(s=><option value={s.id} key={s.id}>{s.name} · SIM {s.id}</option>)}</select></label><p className="sheet-note">通过 Android 手机发送文字短信。附件、iMessage 与语音暂不支持。</p><button className="primary" onClick={()=>setSheet(false)}>完成</button></div>
+  {screen==='chat'&&<p>{formatPhone(active||'',region)}</p>}<label className="sheet-line">发送线路<select aria-label="选项中的发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!sims.length&&<option value="">无可用 SIM</option>}{sims.map(s=><option value={s.id} key={s.id}>{s.name} · SIM {s.id}</option>)}</select></label>{screen==='chat'&&<><div className="sheet-line alert-toggle"><span>隐藏提醒</span><button type="button" className="ios-switch" role="switch" aria-label="隐藏提醒" aria-checked={!!meta.get(active!)?.muted} disabled={busy} onClick={()=>void act([active!],meta.get(active!)?.muted?'unmute':'mute')}><span/></button></div><p className="mute-note">只停止此对话在助手中的 iPhone 推送，短信仍会正常接收。安卓本机通知不受影响。</p>{error&&<p className="dialog-error">{error}</p>}</>}<p className="sheet-note">通过 Android 手机发送文字短信。附件、iMessage 与语音暂不支持。</p><button className="primary" onClick={()=>setSheet(false)}>完成</button></div>
  </dialog>
  </>}{error&&<div role="alert" className="error"><span>{error}</span><button aria-label="关闭提示" onClick={()=>setError('')}><Icon name="close" size={18}/></button></div>}
  </main>

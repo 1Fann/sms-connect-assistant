@@ -56,7 +56,7 @@ class DefaultSmsStore(private val context: Context) : SQLiteOpenHelper(context, 
                 }))
                 // The gateway's incoming store already deduplicates webhook events.
                 receiver.process(context, InboxMessage.Text(body, address, Date(sent), sub.takeIf { it >= 0 }), true)
-                WebPushWorker.enqueue(context)
+                WebPushWorker.enqueue(context,address)
                 DefaultSms.notify(context, "收到新短信，点按查看")
                 writableDatabase.update("incoming", ContentValues().apply {
                     put("done", 1); putNull("body"); putNull("address")

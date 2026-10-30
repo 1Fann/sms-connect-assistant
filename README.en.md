@@ -4,7 +4,7 @@
 
 Use your own Android phone as an SMS endpoint and read, receive, and send messages from an iPhone Home Screen web app. A single APK contains the HTTPS server and web interface; no continuously running computer is required.
 
-**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.5.0-candidate**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
+**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.6.0-candidate**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
@@ -22,6 +22,8 @@ Use your own Android phone as an SMS endpoint and read, receive, and send messag
 - International number display uses Google libphonenumber / libphonenumber-js numbering rules. These are not Apple's private formatting API and do not guarantee exact matches across all iOS versions.
 
 - Conversation gestures: swipe left to remove, swipe right to mark read/unread, long-press menus, up to nine pinned conversations, bulk removal and recovery. Metadata persists on Android. Removal affects the assistant only; original Android SMS remain intact. Recently Deleted supports recovery without an expiry, and new messages remain visible.
+- Hide Alerts: a purple bell beside Delete, with the same control in the long-press menu and contact sheet. State persists on Android and suppresses only the selected conversation’s iPhone push notifications. SMS reception and Android alerts continue. Queued/retried work rechecks mute state; notifications already submitted to Apple cannot be recalled.
+- More interactions: edit pins, batch mark unread, full swipe right to toggle read state, long-press bubbles to copy/forward, and drag left to reveal timestamps. Forwarding creates a draft requiring an explicit recipient and send action.
 - Motion: swipe settling, menu/sheet transitions, conversation navigation, and bubble entrances respect the system Reduced Motion preference.
 
 ## Quick start
@@ -62,7 +64,7 @@ For a signed release set `SIGNING_STORE_FILE` (absolute path to your private key
 
 ## Validation and limitations
 
-- This version passed a local build, 118 Android unit tests, 14 frontend tests, and mocked browser flows. Mock tests do not send SMS.
+- This version passed a local build, 124 Android unit tests, 14 frontend tests, and mocked browser flows. Mock tests do not send SMS.
 - Earlier versions verified dual-SIM discovery, real SMS sending/receiving, an iPhone test notification, and public IPv6 access on one Redmi / Android 13 / MIUI 14 device. Version 0.3.0 verified Root recovery after force-stop, respecting manual stop, and disabling the watchdog without stopping SMS service. Version 0.3.1 mainly renames the application and removes personal defaults from public source.
 - Local HTTPS health does not prove internet reachability or carrier delivery. Non-Root background fallback checks have a 15-minute minimum and may be delayed; they cannot bypass force-stop. Root protection is not a guarantee of permanent availability.
 - The certificate job checks daily and attempts renewal within 30 days of expiry. Real expiry-driven renewal, long-term locked-screen operation, watchdog startup after a full reboot, and other ROMs still need validation.

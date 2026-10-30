@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## 0.6.0-candidate
+
+- 补齐左滑“隐藏提醒 + 删除”，静音标记、长按菜单和联系人详情开关共享持久状态。
+- 推送按对话实际静音，在入队、执行和重试时检查；匹配全球号码格式与地区，不做后缀模糊匹配。保留短信接收和安卓通知；显式测试通知独立。已提交到 Apple 的提醒不能撤回。
+- 新增“编辑 → 选择信息 / 编辑置顶”、批量标未读、向右完整滑动切换已读、气泡长按拷贝/转发、向左拖动查看时间。转发仅创建草稿。
+- 124 项 Android 单元测试、14 项前端测试及三套模拟浏览器流程通过；更新保留配对、证书与原有检测设置。
+
+- Complete swipe-left Hide Alerts + Delete, persistent mute indicators, and matching long-press/contact-sheet controls.
+- Suppress actual per-conversation push at enqueue, execution, and retry using country-aware sender identity, without suffix matching. SMS reception and Android alerts remain active; explicit test notifications are independent. Already-submitted Apple notifications cannot be recalled.
+- Add Edit → Select Messages / Edit Pins, batch mark unread, full swipe-right read toggling, long-press bubble copy/forward, and drag-left timestamps. Forwarding only creates a draft.
+- Pass 124 Android unit tests, 14 frontend tests, and three mocked browser flows. Upgrades preserve pairing, certificates, and monitoring settings.
+
+Reference / 参考：[Apple 隐藏提醒操作](https://support.apple.com/zh-cn/guide/iphone/iph62faab6a4/27/ios/27)。Web rendering does not implement iMessage, RCS or iOS system Focus controls.
+
 ## 0.5.0-candidate
 
 - 新增左滑删除、右滑已读/未读、长按菜单、最多九个置顶会话、批量删除及“最近删除”恢复。

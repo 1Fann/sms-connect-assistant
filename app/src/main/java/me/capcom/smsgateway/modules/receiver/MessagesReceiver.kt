@@ -68,7 +68,7 @@ class MessagesReceiver : BroadcastReceiver(), KoinComponent {
             true,
         )
         if (inboxMessage is InboxMessage.Text) {
-            me.capcom.smsgateway.modules.iphone.WebPushWorker.enqueue(context)
+            me.capcom.smsgateway.modules.iphone.WebPushWorker.enqueue(context,inboxMessage.address)
         }
     }
 

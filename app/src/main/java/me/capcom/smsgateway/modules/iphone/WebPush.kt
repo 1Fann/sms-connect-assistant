@@ -58,6 +58,9 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         var retry=false
         PrivateStore(applicationContext).use { store ->
             for(endpoint in store.subscriptions()) {
+                // Recheck on execution and retry: the conversation may have been
+                // muted while offline. The sender stays on Android, never in the push.
+                if(!PushPolicy.allowed(inputData.getString("address"),store.conversations(),inputData.getBoolean("test",false))) return@withContext Result.success()
                 try { when(val status=WebPush(applicationContext).send(endpoint)) {
                     404,410 -> store.removeSubscription(endpoint)
                     429 -> retry=true
@@ -69,8 +72,17 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         if(retry && runAttemptCount<3)Result.retry() else Result.success()
     }
     companion object {
-        fun enqueue(context: Context) { WorkManager.getInstance(context).enqueueUniqueWork("iphone-push",ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<WebPushWorker>().setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build()) }
+        fun enqueue(context: Context, address: String) {
+            if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
+            if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return
+            queue(context,workDataOf("address" to address.take(100)),false)
+        }
+        fun enqueueTest(context: Context) = queue(context,workDataOf("test" to true),true)
+        private fun queue(context: Context,data: Data,test: Boolean) {
+            // KEEP could drop an unmuted message arriving behind a muted job.
+            WorkManager.getInstance(context).enqueueUniqueWork(if(test)"iphone-push-test" else "iphone-push",if(test)ExistingWorkPolicy.KEEP else ExistingWorkPolicy.APPEND_OR_REPLACE,
+                OneTimeWorkRequestBuilder<WebPushWorker>().setInputData(data).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build())
+        }
     }
 }

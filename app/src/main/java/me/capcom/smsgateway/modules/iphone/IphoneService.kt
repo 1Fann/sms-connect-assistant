@@ -132,7 +132,7 @@ class IphoneService : Service() {
                     get("/api/sims") { call.respond(SubscriptionsHelper.getActiveSimCards(this@IphoneService).map { mapOf("id" to it.simNumber, "name" to (prefs.getString("sim.${it.simNumber}", null) ?: it.carrierName ?: "SIM ${it.simNumber}")) }) }
                     get("/api/contacts") { call.respond(history.contacts(call.request.queryParameters["q"] ?: "")) }
                     get("/api/conversations") { call.respond(store.conversations()) }
-                    post("/api/conversations") { val b=call.json(); call.respond(store.updateConversation(b["address"]!!,b["action"]!!)) }
+                    post("/api/conversations") { val b=call.json(); call.respond(store.updateConversation(b["address"]!!,b["action"]!!,b["region"] ?: "CN")) }
                     post("/api/sims") { val b=call.json(); val id=b["id"]!!.toInt(); require(id in 1..3); prefs.edit().putString("sim.$id", b["name"]!!.take(30)).apply(); call.respond(mapOf("ok" to true)) }
                     get("/api/history") {
                         val before = call.request.queryParameters["before"]?.toLong() ?: Long.MAX_VALUE
@@ -152,7 +152,7 @@ class IphoneService : Service() {
                     get("/api/push/key") { call.respond(mapOf("key" to WebPush(this@IphoneService).publicKey())) }
                     post("/api/push/subscribe") { val b=call.json();store.subscribe(b["endpoint"]!!,call.request.cookies["__Host-iphone"]!!);call.respond(mapOf("ok" to true)) }
                     post("/api/push/unsubscribe") { store.unsubscribe(call.request.cookies["__Host-iphone"]!!);call.respond(mapOf("ok" to true)) }
-                    post("/api/push/test") { if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests);WebPushWorker.enqueue(this@IphoneService);call.respond(mapOf("status" to "已排队；不代表已提交或设备已收到")) }
+                    post("/api/push/test") { if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests);WebPushWorker.enqueueTest(this@IphoneService);call.respond(mapOf("status" to "已排队；不代表已提交或设备已收到")) }
                     get("/api/push/status") { call.respond(mapOf("status" to (prefs.getString("push-status",null) ?: "尚无提交结果"))) }
                     post("/api/send") {
                         val b = call.json()

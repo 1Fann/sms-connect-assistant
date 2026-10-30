@@ -1,0 +1,6 @@
+{
+  "name": "iphone-sms", "private": true, "version": "0.1.0", "type": "module",
+  "scripts": {"build": "tsc --noEmit && vite build", "test": "tsx --test tests/*.test.ts", "dev": "vite --host 127.0.0.1"},
+  "dependencies": {"react": "19.2.0", "react-dom": "19.2.0", "libphonenumber-js": "1.12.24"},
+  "devDependencies": {"@types/react": "19.2.2", "@types/react-dom": "19.2.2", "typescript": "5.9.3", "vite": "7.1.12", "tsx": "4.20.6", "@types/node": "22.18.6"}
+}

@@ -1,0 +1,129 @@
+package me.capcom.smsgateway.modules.receiver
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.provider.Telephony.Sms.Intents
+import android.util.Log
+import me.capcom.smsgateway.extensions.setComponentEnabled
+import me.capcom.smsgateway.helpers.SubscriptionsHelper
+import me.capcom.smsgateway.modules.receiver.data.InboxMessage
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
+import java.util.Date
+
+class MessagesReceiver : BroadcastReceiver(), KoinComponent {
+    private val receiverSvc: ReceiverService by inject()
+
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intents.SMS_RECEIVED_ACTION &&
+            me.capcom.smsgateway.modules.defaultsms.DefaultSms.isDefault(context)) return
+        if (intent.action != Intents.SMS_RECEIVED_ACTION
+            && intent.action != Intents.DATA_SMS_RECEIVED_ACTION
+        ) {
+            return
+        }
+
+        val messages = Intents.getMessagesFromIntent(intent) ?: return
+        if (messages.isEmpty()) return
+
+        val isDataMessage = intent.action == Intents.DATA_SMS_RECEIVED_ACTION
+        val firstMessage = messages.first()
+
+        val inboxMessage = when (isDataMessage) {
+            false -> InboxMessage.Text(
+                messages.joinToString(separator = "") { it.displayMessageBody },
+                firstMessage.displayOriginatingAddress,
+                Date(firstMessage.timestampMillis),
+                SubscriptionsHelper.extractSubscriptionId(context, intent)
+            )
+
+            true -> {
+                val userData = messages
+                    .mapNotNull { it.userData }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { parts ->
+                        ByteArray(parts.sumOf { it.size }).also { output ->
+                            var offset = 0
+                            for (part in parts) {
+                                part.copyInto(output, destinationOffset = offset)
+                                offset += part.size
+                            }
+                        }
+                    }
+                InboxMessage.Data(
+                    userData,
+                    firstMessage.displayOriginatingAddress,
+                    Date(firstMessage.timestampMillis),
+                    SubscriptionsHelper.extractSubscriptionId(context, intent)
+                )
+            }
+        }
+
+        receiverSvc.process(
+            context,
+            inboxMessage,
+            true,
+        )
+        if (inboxMessage is InboxMessage.Text) {
+            me.capcom.smsgateway.modules.iphone.WebPushWorker.enqueue(context)
+        }
+    }
+
+    companion object {
+        private const val TAG = "MessagesReceiver"
+
+        private val INSTANCE: MessagesReceiver by lazy { MessagesReceiver() }
+
+        fun start(context: Context) {
+            register(context)
+            context.applicationContext.setComponentEnabled(
+                MessagesReceiver::class.java,
+                true
+            )
+        }
+
+        fun stop(context: Context) {
+            unregister(context)
+            context.applicationContext.setComponentEnabled(
+                MessagesReceiver::class.java,
+                false
+            )
+        }
+
+        private fun register(context: Context) {
+            val appContext = context.applicationContext
+            unregister(appContext)
+
+            val textFilter = IntentFilter().apply {
+                addAction(Intents.SMS_RECEIVED_ACTION)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appContext.registerReceiver(INSTANCE, textFilter, Context.RECEIVER_EXPORTED)
+            } else {
+                appContext.registerReceiver(INSTANCE, textFilter)
+            }
+
+            val dataFilter = IntentFilter().apply {
+                addAction(Intents.DATA_SMS_RECEIVED_ACTION)
+                addDataScheme("sms")
+                addDataAuthority("*", "53739")
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appContext.registerReceiver(INSTANCE, dataFilter, Context.RECEIVER_EXPORTED)
+            } else {
+                appContext.registerReceiver(INSTANCE, dataFilter)
+            }
+        }
+
+        private fun unregister(context: Context) {
+            try {
+                context.applicationContext.unregisterReceiver(INSTANCE)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "Receiver was not registered", e)
+            }
+        }
+    }
+}

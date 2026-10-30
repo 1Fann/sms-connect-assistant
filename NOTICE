@@ -1,0 +1,15 @@
+SMS Connect Assistant / 短信互联助手
+Maintained by 1Fann: https://github.com/1Fann/sms-connect-assistant
+
+Derived from SMS Gateway for Android by capcom6 and contributors:
+https://github.com/capcom6/android-sms-gateway
+Upstream baseline: 81b34154aae8759171ee254f742dbe6489be60fa
+Upstream and this fork: Apache License, Version 2.0.
+This distribution includes modifications for an iPhone PWA, private HTTPS,
+default SMS handling, certificate management, and optional Root monitoring.
+Original source notices are retained. This fork is not an upstream release.
+
+Major third-party components include AndroidX, Kotlin, Ktor, Netty, OkHttp,
+Conscrypt, acme4j, Google libphonenumber, libphonenumber-js, React, and Vite.
+Their licenses apply independently; dependency versions are declared in
+Gradle files and pwa/package.json / pwa/pnpm-lock.yaml.

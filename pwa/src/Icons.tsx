@@ -1,7 +1,11 @@
 import type {CSSProperties,ReactNode} from 'react';
 
-export type IconName='back'|'chevron'|'search'|'compose'|'filter'|'plus'|'send'|'person'|'close'|'check'|'settings'|'refresh';
+export type IconName='back'|'chevron'|'search'|'compose'|'filter'|'plus'|'send'|'person'|'close'|'check'|'settings'|'refresh'|'pin'|'trash'|'envelope'|'restore';
 const paths:Record<IconName,ReactNode>={
+ pin:<><path d="m15 3 6 6-4 1-3 5-2-2-5 5-1-1 5-5-2-2 5-3Z"/><path d="m6 18-3 3"/></>,
+ trash:<><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></>,
+ envelope:<><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></>,
+ restore:<><path d="M4 10a8 8 0 1 1 1 8M4 3v7h7M12 7v6l3 2"/></>,
  back:<path d="m15 4-8 8 8 8"/>,chevron:<path d="m9 5 7 7-7 7"/>,
  search:<><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></>,
  compose:<><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M14 4l3 3M10 15l-1 1 1-5L20 1l3 3-10 10Z"/></>,

@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## 0.5.0-candidate
+
+- 新增左滑删除、右滑已读/未读、长按菜单、最多九个置顶会话、批量删除及“最近删除”恢复。
+- 置顶、未读与移除状态保存在安卓端，重新打开或覆盖升级后保留。删除只影响助手显示，安卓原始短信不删除；新短信仍会正常出现，恢复不设自动过期。
+- 打磨滑动回弹、菜单和底部弹层进出、页面切换与气泡动画；响应系统“减弱动态效果”，防止纵向滚动及长按松手误触。
+- 118 项 Android 单元测试、14 项前端测试和三套模拟浏览器流程通过；实机更新保留原有配对、证书及检测间隔。
+
+- Add swipe-to-remove, swipe-to-mark read/unread, long-press menus, up to nine pinned conversations, bulk removal, and Recently Deleted recovery.
+- Store conversation metadata on Android across reloads and signed upgrades. Removal only changes the assistant view, preserving original Android SMS; new messages remain visible and recovery has no automatic expiry.
+- Refine swipe settling, menu/sheet transitions, navigation and bubble entrances. Respect Reduced Motion and prevent vertical scrolling or long-press release from activating unintended actions.
+- Pass 118 Android unit tests, 14 frontend tests and three mocked browser flows. Signed device updates retain pairing, certificates and monitor settings.
+
+References / 参考：[Apple 对话置顶与未读操作](https://support.apple.com/zh-cn/guide/iphone/iphe9b48b89e/27/ios/27)、[Apple 删除对话操作](https://support.apple.com/zh-cn/guide/iphone/iph2c9c4bfcb/27/ios/27)。此项目使用助手内移除/恢复语义，未模拟 iCloud 删除，也不实现 iMessage 功能。Web gestures and motion approximate Messages; they are not native system controls.
+
 ## 0.4.0-candidate
 
 - 按 Apple 官方 iOS 27“信息”参考图重做 iPhone 页面，面向 iOS 27.2：底部悬浮搜索/新建、玻璃按钮、联系人头像、分组气泡与时间。

@@ -15,6 +15,7 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  else if(p==='/api/status'){data={publicConnectivity:'unverified'}}
  else if(p==='/api/sims'){data=[{id:1,name:'中国联通'},{id:2,name:'备用线路'}]}
  else if(p==='/api/history'){if(historyFails)status=500;data={items:[{id:'sms:1',address:'13800138000',body:'这是一条用于界面验证的测试短信。',date:Date.now(),incoming:true,read:false,sim:1,state:'received'}],next:null}}
+ else if(p==='/api/conversations'){data=[]}
  else if(p==='/api/outgoing'){data=failedMessage?[failedMessage]:[]}
  else if(p==='/api/send'){const body=route.request().postDataJSON();ids.push(body.id);if(failSend){failSend=false;await route.abort('failed');return}data={state:'accepted'}}
  else if(p.startsWith('/api/send/')){data={state:'unknown'}}

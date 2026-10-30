@@ -131,6 +131,8 @@ class IphoneService : Service() {
                     get("/api/status") { call.respond(mapOf("status" to status, "publicConnectivity" to "unverified", "addresses" to addresses(), "webPush" to true, "devices" to store.devices())) }
                     get("/api/sims") { call.respond(SubscriptionsHelper.getActiveSimCards(this@IphoneService).map { mapOf("id" to it.simNumber, "name" to (prefs.getString("sim.${it.simNumber}", null) ?: it.carrierName ?: "SIM ${it.simNumber}")) }) }
                     get("/api/contacts") { call.respond(history.contacts(call.request.queryParameters["q"] ?: "")) }
+                    get("/api/conversations") { call.respond(store.conversations()) }
+                    post("/api/conversations") { val b=call.json(); call.respond(store.updateConversation(b["address"]!!,b["action"]!!)) }
                     post("/api/sims") { val b=call.json(); val id=b["id"]!!.toInt(); require(id in 1..3); prefs.edit().putString("sim.$id", b["name"]!!.take(30)).apply(); call.respond(mapOf("ok" to true)) }
                     get("/api/history") {
                         val before = call.request.queryParameters["before"]?.toLong() ?: Long.MAX_VALUE

@@ -7,17 +7,37 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Only hashes and metadata are stored here, never SMS bodies or raw session keys. */
-class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", null, 3) {
+class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE sessions (hash TEXT PRIMARY KEY, name TEXT NOT NULL, expires INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE requests (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, created INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE reads (address TEXT PRIMARY KEY, seen INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE subscriptions (endpoint TEXT PRIMARY KEY, owner TEXT NOT NULL)")
         db.execSQL("CREATE TABLE refresh (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL)")
+        createConversations(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
         if(old<2) db.execSQL("CREATE TABLE subscriptions (endpoint TEXT PRIMARY KEY, owner TEXT NOT NULL)")
         if(old<3) db.execSQL("CREATE TABLE refresh (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL)")
+        if(old<4) createConversations(db)
+    }
+    private fun createConversations(db: SQLiteDatabase) = db.execSQL("CREATE TABLE conversations (address TEXT PRIMARY KEY, pinned INTEGER NOT NULL, removed_before INTEGER NOT NULL, unread INTEGER NOT NULL)")
+    fun conversations(): List<ConversationState> = readableDatabase.rawQuery("SELECT address,pinned,removed_before,unread FROM conversations",null).use { c ->
+        buildList { while(c.moveToNext()) add(ConversationState(c.getString(0),c.getLong(1),c.getLong(2),c.getInt(3)!=0)) }
+    }
+    @Synchronized fun updateConversation(address: String, action: String): List<ConversationState> {
+        require(address.isNotBlank() && address.length<=100 && address.none { it.isISOControl() })
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val states=conversations()
+            val current=states.find { it.address==address } ?: ConversationState(address)
+            val next=ConversationRules.change(current,action,System.currentTimeMillis(),states.count { it.pinned>0 })
+            db.execSQL("INSERT OR REPLACE INTO conversations VALUES(?,?,?,?)",arrayOf(next.address,next.pinned,next.removedBefore,if(next.unread) 1 else 0))
+            val result=conversations()
+            db.setTransactionSuccessful()
+            return result
+        } finally { db.endTransaction() }
     }
     fun subscribe(endpoint: String,token: String) {
         require(WebPush.validEndpoint(endpoint))

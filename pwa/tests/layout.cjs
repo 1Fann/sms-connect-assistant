@@ -17,7 +17,8 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  let rows=[...conversation,...other],reads=0;
  await page.route('**/api/**',async route=>{const p=new URL(route.request().url()).pathname;let data={};
   if(p==='/api/history')data={items:rows,next:null};
-  else if(p==='/api/outgoing')data=[];
+  else if(p==='/api/conversations'){data=[]}
+ else if(p==='/api/outgoing')data=[];
   else if(p==='/api/sims')data=[{id:1,name:'主号'},{id:2,name:'副号'}];
   else if(p==='/api/read'){reads++;const b=route.request().postDataJSON();rows=rows.map(m=>m.address===b.address?{...m,read:true}:m)}
   else if(p==='/api/contacts')data=[{name:'小林',number}];

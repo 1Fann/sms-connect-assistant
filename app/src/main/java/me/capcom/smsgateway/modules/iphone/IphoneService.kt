@@ -45,6 +45,9 @@ class IphoneService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(101, notifications.makeNotification(this, 101, "iPhone 远程短信 HTTPS"))
+        // Non-exported service: root deployment can refresh an existing enabled guard
+        // without changing service preferences, copying credentials, or opening UI.
+        if (intent?.action == ACTION_REFRESH_ROOT) RootBridge.refreshIfAuthorized(this, discoverExisting=true)
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
         if (starting.compareAndSet(false,true)) scope.launch {
             try {
@@ -204,6 +207,7 @@ class IphoneService : Service() {
     companion object {
         const val ACTION_RECOVER = "me.capcom.smsgateway.iphone.RECOVER"
         const val ACTION_CHECK = "me.capcom.smsgateway.iphone.CHECK"
+        const val ACTION_REFRESH_ROOT = "me.capcom.smsgateway.iphone.REFRESH_ROOT_GUARD"
         fun recover(context: Context) { val i=Intent(context,IphoneService::class.java).setAction(ACTION_RECOVER); if(android.os.Build.VERSION.SDK_INT>=26) context.startForegroundService(i) else context.startService(i) }
         @Volatile var status = "已关闭"
         private var code = ""

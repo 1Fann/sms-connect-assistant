@@ -4,7 +4,9 @@
 
 Use your own Android phone as an SMS endpoint and read, receive, and send messages from an iPhone Home Screen web app. A single APK contains the HTTPS server and web interface; no continuously running computer is required.
 
-**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.7.1-candidate**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
+**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.7.4**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
+
+0.7.4 removes the first checker-restart delay and requests service recovery on the tick that confirms a known process died without a replacement. Normal lightweight polling remains once per second; repeated failures, HTTPS cadence and repair limits retain their existing safeguards. See [behavior, limitations and validation](docs/RELIABILITY.md).
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
@@ -19,7 +21,7 @@ Use your own Android phone as an SMS endpoint and read, receive, and send messag
 - Cloudflare DNS-01 certificate issuance and renewal jobs, or manual certificate import. Users maintain their own DDNS.
 - iOS Home Screen Web Push without message bodies or full phone numbers. Delivery depends on Apple push services and may be delayed.
 - Configurable checks every 1–1440 minutes, default 5, covering local HTTPS, certificates, permissions, and IPv6 DNS.
-- Optional independent Root watchdog checks the process every 10 seconds and performs bounded recovery while respecting manual stop. Root is not required for normal SMS operation.
+- Optional independent Root watchdog checks cached process identity every second and performs bounded recovery while respecting manual stop. Root is not required for normal SMS operation.
 - International number display uses Google libphonenumber / libphonenumber-js numbering rules. These are not Apple's private formatting API and do not guarantee exact matches across all iOS versions.
 
 - Conversation gestures: swipe left to remove, swipe right to mark read/unread, long-press menus, up to nine pinned conversations, bulk removal and recovery. Metadata persists on Android. Removal affects the assistant only; original Android SMS remain intact. Recently Deleted supports recovery without an expiry, and new messages remain visible.
@@ -34,7 +36,7 @@ Use your own Android phone as an SMS endpoint and read, receive, and send messag
 3. Configure your own domain and trusted HTTPS certificate. `sms.example.com` in public source is a placeholder and must be replaced.
 4. Point DNS at a reachable address on the phone. The tested deployment uses public IPv6 with TCP 8443 allowed only to the target device; the iPhone network must also support IPv6. Use Cloudflare DNS-only records.
 5. Start the service. Open `https://your-domain:8443` in Safari, add it to the Home Screen, launch it there, enter the pairing code, and approve access on Android.
-6. For optional Root protection, select Enable/update Root watchdog (`启用 / 更新 Root 守护`) and grant access in the superuser manager. Reconfirm the watchdog version after an APK update.
+6. For optional Root protection, select Enable/update Root watchdog (`启用 / 更新 Root 守护`) and grant access in the superuser manager. After enabling it in this version, app startup refreshes an enabled guard after APK updates; check both supervisor and monitor process status on this page.
 
 First-install permissions, certificates, and pairing cannot be silently granted by an APK. Updates with the same package ID and signature preserve configuration; uninstalling or reinstalling with a different signature can lose private configuration. Existing iPhone Home Screen icon names may require manual renaming.
 
@@ -67,7 +69,7 @@ For a signed release set `SIGNING_STORE_FILE` (absolute path to your private key
 
 A desktop regression with 1,000 messages and a 200-message conversation reduced React commits during 36 timestamp drag moves from 32 to 0. Edge-back cancellation, interrupted gestures, previews, and failed-save rollback are covered. These checks do not measure iPhone frame rates.
 
-- This version passed a local build, 124 Android unit tests, 35 frontend tests, and mocked browser flows. Mock tests do not send SMS.
+- Version 0.7.4 passed a local build, 136 Android unit tests and 7 supervisor script tests. The unchanged frontend retains the previous version's 35 frontend tests and mocked browser validation. Mock tests do not send SMS.
 - Earlier versions verified dual-SIM discovery, real SMS sending/receiving, an iPhone test notification, and public IPv6 access on one Redmi / Android 13 / MIUI 14 device. Version 0.3.0 verified Root recovery after force-stop, respecting manual stop, and disabling the watchdog without stopping SMS service. Version 0.3.1 mainly renames the application and removes personal defaults from public source.
 - Local HTTPS health does not prove internet reachability or carrier delivery. Non-Root background fallback checks have a 15-minute minimum and may be delayed; they cannot bypass force-stop. Root protection is not a guarantee of permanent availability.
 - The certificate job checks daily and attempts renewal within 30 days of expiry. Real expiry-driven renewal, long-term locked-screen operation, watchdog startup after a full reboot, and other ROMs still need validation.

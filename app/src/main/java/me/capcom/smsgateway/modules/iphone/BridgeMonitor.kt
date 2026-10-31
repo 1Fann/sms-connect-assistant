@@ -45,6 +45,7 @@ object BridgeMonitor {
             prefs(c).registerOnSharedPreferenceChangeListener(listener)
         }
         syncState(c); schedule(c)
+        RootBridge.refreshIfAuthorized(c)
     }
     @Synchronized fun syncState(c: Context) {
         val phone = c.getSharedPreferences("iphone",0)

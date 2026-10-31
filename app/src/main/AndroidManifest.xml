@@ -60,6 +60,7 @@
                 <data android:scheme="sms" /><data android:scheme="smsto" /><data android:scheme="mms" /><data android:scheme="mmsto" />
             </intent-filter>
         </activity>
+        <activity android:name=".modules.iphone.PeerSetupActivity" android:exported="true" />
         <service android:name=".modules.iphone.IphoneService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <service
             android:name=".modules.gateway.services.SSEForegroundService"

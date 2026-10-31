@@ -4,14 +4,15 @@
 
 Use your own Android phone as an SMS endpoint and read, receive, and send messages from an iPhone Home Screen web app. A single APK contains the HTTPS server and web interface; no continuously running computer is required.
 
-**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.7.4**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
+**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.8.2**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
 
-0.7.4 removes the first checker-restart delay and requests service recovery on the tick that confirms a known process died without a replacement. Normal lightweight polling remains once per second; repeated failures, HTTPS cadence and repair limits retain their existing safeguards. See [behavior, limitations and validation](docs/RELIABILITY.md).
+0.8.2 adds two-phone sharing and custom phone/SIM names. Phones use server and sharing roles without a brand restriction; existing pairings and message identities survive the update. See [two-phone setup](docs/MULTI_PHONE.md) and [bilingual release notes](docs/releases/v0.8.2.md).
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 ## Features
 
+- Pair two compatible Android phones of any brand: one server phone and one sharing phone. The iPhone combines their messages and offers each phone's SIM lines for sending. See [two-phone setup](docs/MULTI_PHONE.md).
 - iPhone PWA with message lists, conversations, contact search, dual-SIM selection, sending status, and light/dark themes.
 - Refined against a native Messages recording: a centered title, circular swipe actions, centered pins, floating search/compose, and grouped bubbles. Long-press opens a conversation preview with a separate menu; previewing does not mark messages read. Web materials still differ from native rendering.
 - Keyboard layout keeps a stable shell while the chat area separately avoids the keyboard. The floating composer removes duplicate bottom safe-area spacing; bottom-following and older-message reading positions are preserved, including multiline input. Viewport simulations pass. The user confirmed on an iPhone that the page stays stable as the keyboard opens/closes and the composer sits above it; other devices and keyboards still need validation.

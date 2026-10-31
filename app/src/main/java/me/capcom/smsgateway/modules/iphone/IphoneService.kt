@@ -34,6 +34,8 @@ class IphoneService : Service() {
     private var server: ApplicationEngine? = null
     private val starting = java.util.concurrent.atomic.AtomicBoolean(false)
     private val serverLock = Any()
+    private val hub by lazy { PeerHub.get(this) }
+    private val labels by lazy { PhoneLabels(this) }
     private var lastRecovery = 0L
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private val store by lazy { PrivateStore(this) }
@@ -48,6 +50,18 @@ class IphoneService : Service() {
         // Non-exported service: root deployment can refresh an existing enabled guard
         // without changing service preferences, copying credentials, or opening UI.
         if (intent?.action == ACTION_REFRESH_ROOT) RootBridge.refreshIfAuthorized(this, discoverExisting=true)
+        if (getSharedPreferences("peer-client",0).getBoolean("enabled",false)) {
+            if(starting.compareAndSet(false,true)) scope.launch {
+                // Keep the paired phone's polling alive when its screen is off.
+                // The service releases this lock in onDestroy, including stop-sharing.
+                wakeLock = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+                    .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"iphone:peer").apply { acquire() }
+                PeerClient(this@IphoneService).run(history,store,::messageState){ id,address,body,slot ->
+                    messages.enqueueMessage(SendRequest(EntitySource.Local, Message(id,MessageContent.Text(body),listOf(address),false,Date()),SendParams(true,true,slot,null,null,null)))
+                }
+            }
+            return START_STICKY
+        }
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
         if (starting.compareAndSet(false,true)) scope.launch {
             try {
@@ -107,6 +121,18 @@ class IphoneService : Service() {
                     }
                 }
                 routing {
+                    post("/peer/link") {
+                        if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests)
+                        val bearer=call.request.header("Authorization")?.removePrefix("Bearer ").orEmpty()
+                        if(!hub.pair(call.json()["code"].orEmpty(),bearer))return@post call.respond(HttpStatusCode.Forbidden)
+                        call.respond(mapOf("ok" to true))
+                    }
+                    post("/peer/sync") {
+                        val bearer=call.request.header("Authorization")?.removePrefix("Bearer ").orEmpty()
+                        if(!hub.authorized(bearer))return@post call.respond(HttpStatusCode.Forbidden)
+                        val data=org.json.JSONObject(call.limitedBody(2*1024*1024))
+                        call.respondText(hub.sync(bearer,data).toString(),ContentType.Application.Json)
+                    }
                     get("/healthz") { call.respond(mapOf("service" to "sms-bridge", "ok" to true)) }
                     post("/api/pair") {
                         if(!pairingLimit.allow()) return@post call.respond(HttpStatusCode.TooManyRequests)
@@ -132,15 +158,28 @@ class IphoneService : Service() {
                         call.respond(mapOf("ok" to true))
                     }
                     get("/api/status") { call.respond(mapOf("status" to status, "publicConnectivity" to "unverified", "addresses" to addresses(), "webPush" to true, "devices" to store.devices())) }
-                    get("/api/sims") { call.respond(SubscriptionsHelper.getActiveSimCards(this@IphoneService).map { mapOf("id" to it.simNumber, "name" to (prefs.getString("sim.${it.simNumber}", null) ?: it.carrierName ?: "SIM ${it.simNumber}")) }) }
+                    get("/api/sims") { call.respond(SubscriptionsHelper.getActiveSimCards(this@IphoneService).map { labels.line(it.simNumber,true) } + hub.lines()) }
+                    get("/api/phones") { call.respond((if(hub.paired)listOf("server","peer") else listOf("server")).map { mapOf("id" to it,"name" to labels.phoneName(it)) }) }
+                    post("/api/phones") {
+                        val b=call.json();val id=b["id"]!!
+                        require(id=="server" || (id=="peer" && hub.paired))
+                        labels.renamePhone(id,b["name"]!!);call.respond(mapOf("ok" to true))
+                    }
                     get("/api/contacts") { call.respond(history.contacts(call.request.queryParameters["q"] ?: "")) }
                     get("/api/conversations") { call.respond(store.conversations()) }
                     post("/api/conversations") { val b=call.json(); call.respond(store.updateConversation(b["address"]!!,b["action"]!!,b["region"] ?: "CN")) }
-                    post("/api/sims") { val b=call.json(); val id=b["id"]!!.toInt(); require(id in 1..3); prefs.edit().putString("sim.$id", b["name"]!!.take(30)).apply(); call.respond(mapOf("ok" to true)) }
+                    post("/api/sims") {
+                        val b=call.json();val id=b["id"]!!.toInt()
+                        require(id in 1..4 || (id in 101..104 && hub.paired))
+                        labels.renameSim(id,b["name"]!!);call.respond(mapOf("ok" to true))
+                    }
                     get("/api/history") {
-                        val before = call.request.queryParameters["before"]?.toLong() ?: Long.MAX_VALUE
-                        val rows = history.page(before, 200)
-                        call.respond(mapOf("items" to rows, "next" to if(rows.size == 200) rows.last().id.substringAfter(':') else null))
+                        val cursors=call.request.queryParameters["before"]?.split("_").orEmpty()
+                        val local=history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200)
+                        val remote=hub.page(cursors.getOrNull(1)?.toLong()?:Long.MAX_VALUE).map { it.copy(read=it.read || it.date<=store.seen(it.address)) }
+                        fun next(rows:List<SmsRow>)=if(rows.size==200)rows.last().id.substringAfter(':') else "0"
+                        val cursor=if(local.size<200 && remote.size<200)null else next(local)+"_"+next(remote)
+                        call.respond(mapOf("items" to (local+remote), "next" to cursor))
                     }
                     get("/api/outgoing") {
                         call.respond(store.recentRequests().mapNotNull { id -> messages.getMessage(id)?.let {
@@ -148,7 +187,7 @@ class IphoneService : Service() {
                             val address=it.recipients.firstOrNull()?.phoneNumber ?: return@let null
                             val result = messageState(id)
                             SmsRow(id.removePrefix("iphone:"),address,history.format(address),history.contact(address),m.textContent?.text ?: "",m.createdAt,false,true,m.simNumber,result["state"]!!,error=result["error"])
-                        } })
+                        } } + hub.outgoing())
                     }
                     post("/api/read") { val b=call.json(); store.markRead(PhoneIdentity.normalize(b["address"]!!), minOf(b["time"]!!.toLong(), System.currentTimeMillis())); call.respond(mapOf("ok" to true)) }
                     post("/api/logout") { store.logout(call.request.cookies["__Host-iphone"] ?: ""); call.response.header("Set-Cookie", "__Host-iphone=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"); call.respond(mapOf("ok" to true)) }
@@ -165,6 +204,13 @@ class IphoneService : Service() {
                         val body = b["body"] ?: ""
                         val sim = b["sim"]?.toInt()
                         require(number.matches(Regex("\\+?[0-9]{3,20}")) && body.isNotBlank() && body.length <= 2000)
+                        if(sim!=null && sim in 101..104){
+                            if(!sendLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests)
+                            if(hub.sent(b["id"]!!)==null && hub.lines().none{it["id"]==sim && it["online"]==true})return@post call.respond(HttpStatusCode.ServiceUnavailable,mapOf("error" to "共享手机或所选线路离线"))
+                            store.reserve(id,PrivateStore.hash("$number\u0000$sim\u0000$body"))
+                            val row=hub.queue(b["id"]!!,number,body,sim)
+                            return@post call.respond(HttpStatusCode.Accepted,mapOf("id" to row.id,"state" to row.state))
+                        }
                         require(sim != null && SubscriptionsHelper.getActiveSimCards(this@IphoneService).any { it.simNumber == sim })
                         val fingerprint = PrivateStore.hash("$number\u0000$sim\u0000$body")
                         if(!sendLimit.allow()) return@post call.respond(HttpStatusCode.TooManyRequests)
@@ -173,7 +219,7 @@ class IphoneService : Service() {
                             SendParams(true, true, sim, null, null, null)))
                         call.respond(HttpStatusCode.Accepted, messageState(id))
                     }
-                    get("/api/send/{id}") { val id=call.parameters["id"]!!; require(id.matches(Regex("[a-fA-F0-9-]{36}"))); call.respond(messageState("iphone:$id")) }
+                    get("/api/send/{id}") { val id=call.parameters["id"]!!; require(id.matches(Regex("[a-fA-F0-9-]{36}"))); call.respond(hub.sent(id)?.let {mapOf("id" to id,"state" to it.state)} ?: messageState("iphone:$id")) }
                     get("/{path...}") {
                         val path = call.parameters.getAll("path")?.joinToString("/").orEmpty().ifBlank { "index.html" }
                         if(path.contains("..") || path.contains('\\')) return@get call.respond(HttpStatusCode.NotFound)
@@ -234,11 +280,14 @@ class IphoneService : Service() {
 }
 
 private suspend fun ApplicationCall.json(): Map<String,String> {
+    val value = com.google.gson.JsonParser.parseString(limitedBody(16384)).asJsonObject
+    return value.entrySet().associate { it.key to it.value.asString }
+}
+private suspend fun ApplicationCall.limitedBody(limit:Int):String {
     require(request.contentType().match(ContentType.Application.Json))
     val channel = receiveChannel()
     val out = java.io.ByteArrayOutputStream()
     val chunk = ByteArray(1024)
-    withTimeout(10_000) { while(true) { val n=channel.readAvailable(chunk); if(n<0) break; require(out.size()+n<=16384); out.write(chunk,0,n) } }
-    val value = com.google.gson.JsonParser.parseString(out.toString("UTF-8")).asJsonObject
-    return value.entrySet().associate { it.key to it.value.asString }
+    withTimeout(10_000) { while(true) { val n=channel.readAvailable(chunk); if(n<0) break; require(out.size()+n<=limit); out.write(chunk,0,n) } }
+    return out.toString("UTF-8")
 }

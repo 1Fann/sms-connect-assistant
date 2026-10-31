@@ -4,14 +4,15 @@
 
 让自己的 Android 手机作为短信终端，在 iPhone 的主屏幕网页应用中查看、接收和发送短信。单个 APK 内置 HTTPS 服务和网页，不需要电脑持续运行。
 
-**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.7.4**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
+**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.8.2**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
 
-0.7.4 取消检查进程首次退出后的固定等待；已观察到业务进程死亡且确认无替代进程时，当轮请求恢复，省去重复等待。正常轻量检查仍约每秒一次，连续故障仍退避，HTTPS 检测频率与恢复次数限制保持原样。[行为、限制与验收](docs/RELIABILITY.md)。
+0.8.2 新增双手机配对共享及手机 / SIM 自定义名称，默认按服务器手机和共享手机区分，不限制品牌。升级保留已有配对和短信记录。[双手机配置](docs/MULTI_PHONE.md) · [中英文更新说明](docs/releases/v0.8.2.md)。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
 ## 功能
 
+- 两部兼容的安卓手机可配对共享，不限品牌：一部作为服务器手机，另一部作为共享手机；iPhone 汇总查看短信，并选择对应手机的 SIM 卡发送。见[双手机配置](docs/MULTI_PHONE.md)。
 - iPhone PWA：短信列表、会话、联系人搜索、双 SIM 线路选择、发送状态和深浅色界面。
 - 参照原生“信息”录屏调整界面：居中标题、圆形滑动操作、居中置顶头像、底部悬浮搜索和分组气泡。长按展开会话预览与独立菜单，预览不会自动标为已读。网页版材质与系统原生仍有差异。
 - 会话手势：左滑删除、右滑已读/未读、长按菜单、最多 9 个置顶会话、批量删除和恢复；状态保存在安卓端。删除仅从助手移除，安卓原始短信保留，“最近删除”可随时恢复，新短信照常显示。

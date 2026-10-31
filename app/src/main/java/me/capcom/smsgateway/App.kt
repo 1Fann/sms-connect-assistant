@@ -81,7 +81,7 @@ class App: Application() {
         me.capcom.smsgateway.modules.defaultsms.InboxRecoveryWorker.enqueue(this)
 
         get<OrchestratorService>().start(this, true)
-        if (android.os.Build.VERSION.SDK_INT >= 23 && getSharedPreferences("iphone",0).getBoolean("enabled",false)) {
+        if (android.os.Build.VERSION.SDK_INT >= 23 && (getSharedPreferences("iphone",0).getBoolean("enabled",false) || getSharedPreferences("peer-client",0).getBoolean("enabled",false))) {
             runCatching { me.capcom.smsgateway.modules.iphone.IphoneService.start(this) }
         }
     }

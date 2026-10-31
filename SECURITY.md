@@ -6,6 +6,7 @@
 
 - API Token、证书私钥等使用 Android Keystore 加密保存在应用私有目录，不随源码或 APK 分发；安装包不包含可用的部署凭据。
 - 网页只缓存界面资源，不持久缓存短信正文或认证密钥；访问凭证使用 Secure / HttpOnly cookie。Android 系统短信库和应用的发送/恢复数据库仍会保存处理短信所需的数据。
+- 双手机共享会将共享手机的短信正文、发件号码和线路信息同步到服务器手机的应用私有数据库。接入需要三分钟有效的接入码和后续认证；服务器端解除配对会删除该共享缓存及设备授权，不删除手机原始短信。
 - 会话静音状态、号码地区及待处理推送的发件号码只保存在安卓私有存储，用于匹配隐藏提醒；不会加入 Apple 推送载荷。
 - Web Push 仅发送无正文通知。Apple、CA、DNS 服务商与运营商仍参与相应网络过程。普通 SMS 没有端到端加密。
 - Root 守护是可选的高权限组件。它只读取检测所需配置，不打开短信库；仅执行哈希已确认的 APK。卸载前应从应用内关闭守护。
@@ -19,6 +20,7 @@ This is a development candidate without an independent security audit. A paired 
 
 - API Tokens and certificate private keys are encrypted with Android Keystore in private app storage and are not distributed in source or APKs. The package contains no working deployment credentials.
 - The browser caches interface assets, not persistent message bodies or authentication keys. Access uses Secure / HttpOnly cookies. Android's SMS database and the app's send/recovery databases still retain data needed to process messages.
+- Two-phone sharing copies the sharing phone's message bodies, sender numbers and line information into the server phone's private app database. Enrollment requires a three-minute invitation code followed by authenticated requests. Revoking the peer on the server removes this cache and authorization without deleting the phones' original SMS records.
 - Conversation mute settings, numbering regions, and queued push sender identifiers remain in private Android storage for Hide Alerts matching. They are not included in Apple push payloads.
 - Web Push notifications omit message content. Apple, certificate authorities, DNS providers, and carriers still participate in their respective network operations. Ordinary SMS is not end-to-end encrypted.
 - The optional Root watchdog is a privileged component. It reads monitoring configuration without opening the SMS database and executes only a hash-approved APK. Disable it in the app before uninstalling.

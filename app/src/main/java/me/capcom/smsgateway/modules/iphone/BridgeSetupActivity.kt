@@ -35,6 +35,7 @@ class BridgeSetupActivity: AppCompatActivity() {
         fun label(text:String)=TextView(this).apply { this.text=text; textSize=16f;setPadding(0,16,0,16);layout.addView(this) }
         fun button(text:String,action:()->Unit) { layout.addView(Button(this).apply { this.text=text; isAllCaps=false; minHeight=56;setOnClickListener { runCatching(action).onFailure { toast(it.message?:"操作失败") } } }) }
         label("首次安装按顺序完成以下设置。收发修复已内置，不需要电脑或关闭 MIUI 优化；系统授权、你的证书和 iPhone 配对仍需首次配置。")
+        button("多手机短信 · 配对与共享"){startActivity(Intent(this,PeerSetupActivity::class.java))}
         state=label("")
         button("1 · 设为默认短信应用") { if(DefaultSms.isDefault(this))toast("已是默认短信应用") else DefaultSms.request(this) }
         button("2 · 授予短信、SIM 与通知权限") { requestPermissions(required.toTypedArray(),72) }

@@ -18,12 +18,12 @@ class SmsHistory(private val context: Context, private val store: PrivateStore) 
             while(result.size<50 && c.moveToNext())result.add(mapOf("name" to (c.getString(0) ?: ""),"number" to (c.getString(1) ?: "")))
         };result
     } catch(_: SecurityException) { emptyList() }
-    fun page(before: Long, limit: Int): List<SmsRow> {
+    fun page(before: Long, limit: Int, ascending: Boolean=false): List<SmsRow> {
         val result = mutableListOf<SmsRow>()
         val names = mutableMapOf<String, String?>()
         context.contentResolver.query(Telephony.Sms.CONTENT_URI,
             arrayOf("_id", "address", "body", "date", "type", "read", "sub_id", "status", "creator"),
-            "_id < ?", arrayOf(before.toString()), "_id DESC")?.use { c ->
+            if(ascending) "_id > ?" else "_id < ?", arrayOf(before.toString()), if(ascending) "_id ASC" else "_id DESC")?.use { c ->
             while (result.size < limit && c.moveToNext()) {
                 val raw = c.getString(1) ?: "未知号码"
                 val address = PhoneIdentity.normalize(raw)

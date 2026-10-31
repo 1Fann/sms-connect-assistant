@@ -13,7 +13,8 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await page.route('**/api/**',async route=>{const p=new URL(route.request().url()).pathname;let data={};let status=200;
  if(p==='/api/pair'){data={status:'pending'}}else if(p==='/api/pair/finish'){paired=true;data={status:'ok'}}else if(!paired){status=401}
  else if(p==='/api/status'){data={publicConnectivity:'unverified'}}
- else if(p==='/api/sims'){data=[{id:1,name:'中国联通'},{id:2,name:'备用线路'}]}
+ else if(p==='/api/phones'){data=[{id:'server',name:'服务器手机'}]}
+ else if(p==='/api/sims'){data=[{id:1,name:'服务器手机 · 中国联通',phoneId:'server',phoneName:'服务器手机',slot:1,simName:'中国联通'},{id:2,name:'服务器手机 · 备用线路',phoneId:'server',phoneName:'服务器手机',slot:2,simName:'备用线路'}]}
  else if(p==='/api/history'){if(historyFails)status=500;data={items:[{id:'sms:1',address:'13800138000',body:'这是一条用于界面验证的测试短信。',date:Date.now(),incoming:true,read:false,sim:1,state:'received'}],next:null}}
  else if(p==='/api/conversations'){data=[]}
  else if(p==='/api/outgoing'){data=failedMessage?[failedMessage]:[]}

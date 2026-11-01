@@ -17,10 +17,30 @@ self.addEventListener('fetch',event=>{
     } catch { return await cache.match(event.request)||Response.error() }
   })());
 });
-self.addEventListener('push',event=>event.waitUntil(Promise.all([
-  self.registration.showNotification('互联电话',{body:'有新的未接来电',tag:'phone-missed',icon:app+'icon-192.png'}),
-  self.navigator.setAppBadge?.().catch(()=>{})
-])));
+async function updateMissedBadge(){
+  try {
+    const request=()=>fetch('/api/v2/call-history/missed',{credentials:'include',cache:'no-store',signal:AbortSignal.timeout(6000)});
+    let response=await request();
+    if(response.status===401){
+      const renewed=await fetch('/api/refresh',{method:'POST',credentials:'include',signal:AbortSignal.timeout(6000)});
+      if(renewed.ok)response=await request();
+      else {await self.navigator.clearAppBadge?.();return}
+    }
+    if(response.status===401||response.status===403){await self.navigator.clearAppBadge?.();return}
+    if(!response.ok)throw Error('Badge count unavailable');
+    const {count}=await response.json();
+    if(!Number.isInteger(count)||count<0)throw Error('Invalid badge count');
+    if(count)await self.navigator.setAppBadge?.(count);else await self.navigator.clearAppBadge?.();
+  }catch{/* The push's initial dot remains when the network is unavailable. */}
+}
+self.addEventListener('push',event=>event.waitUntil((async()=>{
+  await Promise.allSettled([
+    self.registration.showNotification('互联电话',{body:'有新的未接来电',tag:'phone-missed',icon:app+'icon-192.png'}),
+    self.navigator.setAppBadge?.()
+  ]);
+  await updateMissedBadge();
+  for(const client of await clients.matchAll({type:'window'}))client.postMessage({type:'phone-missed-updated'});
+})()));
 self.addEventListener('notificationclick',event=>{
   event.notification.close();
   event.waitUntil((async()=>{

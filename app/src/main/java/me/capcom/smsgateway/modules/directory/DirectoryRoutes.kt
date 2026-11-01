@@ -53,6 +53,17 @@ fun Route.directoryRoutes(directory:DirectoryService,
             directory.history(call.request.queryParameters["deviceId"],offset(call),devices(call),canResolve(call))
         }
     }
+    get("call-history/missed"){
+        if(!requireScope(call,"calls.read"))return@get
+        call.directoryAnswer{directory.missed(installation(call),devices(call))}
+    }
+    post("call-history/seen"){
+        if(!requireScope(call,"calls.read"))return@post
+        call.directoryAnswer{
+            val body=JSONObject(call.limitedBody(65536))
+            directory.seenCalls(installation(call),body.getJSONArray("records"),devices(call))
+        }
+    }
 }
 
 private suspend inline fun ApplicationCall.directoryAnswer(block:()->JSONObject){

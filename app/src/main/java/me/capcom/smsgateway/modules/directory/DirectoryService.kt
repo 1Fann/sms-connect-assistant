@@ -28,6 +28,7 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
             db.execSQL("DELETE FROM identities WHERE device=?",arrayOf(device))
             db.execSQL("DELETE FROM sources WHERE device=?",arrayOf(device))
             db.execSQL("DELETE FROM calls WHERE device=?",arrayOf(device))
+            db.execSQL("DELETE FROM call_seen WHERE device=?",arrayOf(device))
             db.execSQL("DELETE FROM seen WHERE device=?",arrayOf(device))
             db.execSQL("DELETE FROM missed_alerts WHERE device=?",arrayOf(device))
         }
@@ -227,6 +228,31 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
             }
         }
         return page(records,offset,50)
+    }
+
+    fun missed(installation:String,allowed:(String)->Boolean):JSONObject{
+        require(installation.isNotBlank())
+        var count=0
+        db.rawQuery("SELECT c.device,c.payload FROM calls c JOIN grants g ON c.device=g.device WHERE g.calls=1 AND NOT EXISTS(SELECT 1 FROM call_seen s WHERE s.installation=? AND s.device=c.device AND s.raw=c.raw AND s.date=c.date)",arrayOf(installation)).use { c->
+            while(c.moveToNext())if(allowed(c.getString(0))&&JSONObject(c.getString(1)).optString("type")=="missed")count++
+        }
+        return JSONObject().put("count",count)
+    }
+    fun seenCalls(installation:String,records:JSONArray,allowed:(String)->Boolean):JSONObject{
+        require(installation.isNotBlank() && records.length()<=100)
+        db.atomic {
+            for(item in records.objects()){
+                val id=item.getString("id")
+                require(id.startsWith("android:")&&id.length<=180)
+                val compound=id.removePrefix("android:");val raw=compound.substringAfterLast(':');val device=compound.substringBeforeLast(':',"")
+                require(device.isNotBlank()&&(raw.toLongOrNull()?:0L)>0)
+                if(!allowed(device))throw SecurityException()
+                val record=db.scalar("SELECT c.payload FROM calls c JOIN grants g ON g.device=c.device WHERE g.calls=1 AND c.device=? AND c.raw=?",device,raw)?.let(::JSONObject)?:continue
+                if(record.optString("type")!="missed"||record.getLong("date")!=item.getLong("date"))continue
+                db.execSQL("INSERT OR IGNORE INTO call_seen VALUES(?,?,?,?)",arrayOf(installation,device,raw,record.getLong("date")))
+            }
+        }
+        return missed(installation,allowed)
     }
 
     private fun page(rows:List<JSONObject>,offset:Int,size:Int)=JSONObject().put("items",JSONArray(rows.take(size)))

@@ -9,10 +9,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : SQLiteOpenHelper(ctx, name, null, 1) {
+internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : SQLiteOpenHelper(ctx, name, null, 2) {
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
 
-    // Additive v1: older installations never opened this file. None of the four SMS
+    // Separate directory schema. None of the four SMS
     // databases are renamed or rewritten when a phone enables directory sharing.
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE contacts (
@@ -51,10 +51,15 @@ internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : 
         db.execSQL("CREATE TABLE grants(device TEXT PRIMARY KEY,contacts INTEGER NOT NULL,writing INTEGER NOT NULL,calls INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE applied(link TEXT NOT NULL,id TEXT NOT NULL,result TEXT NOT NULL,acked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(link,id))")
         db.execSQL("CREATE TABLE attempts(link TEXT NOT NULL,id TEXT NOT NULL, PRIMARY KEY(link,id))")
+        createCallSeen(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("Unsupported CommLink directory schema upgrade")
+        check(oldVersion==1 && newVersion==2){"Unsupported CommLink directory schema upgrade"}
+        createCallSeen(db)
+    }
+    private fun createCallSeen(db:SQLiteDatabase){
+        db.execSQL("CREATE TABLE call_seen(installation TEXT NOT NULL,device TEXT NOT NULL,raw TEXT NOT NULL,date INTEGER NOT NULL,PRIMARY KEY(installation,device,raw,date))")
     }
 }
 

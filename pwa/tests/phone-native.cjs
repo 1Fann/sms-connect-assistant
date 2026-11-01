@@ -9,22 +9,28 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  const browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL||'msedge',headless:true});
  try{
  const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
- let installation='native-fixture';const page=await context.newPage(),errors=[],writes=[];
+ let installation='native-fixture',missedCount=4;const page=await context.newPage(),errors=[],writes=[];
  await page.addInitScript(()=>{
   navigator.mediaDevices.getUserMedia=()=>{throw Error('The phone page must never request a microphone')};
   window.WebSocket=class{constructor(){throw Error('The phone page must never open SIP/WebSocket')}};
-  window.fixtureLaunches=[];
+  window.fixtureLaunches=[];window.fixtureBadges=[];window.fixtureSms=[];
+  navigator.setAppBadge=async count=>window.fixtureBadges.push(count??'dot');navigator.clearAppBadge=async()=>window.fixtureBadges.push(0);
+  window.addEventListener('click',event=>{const link=event.target.closest('a[aria-label="给此号码发短信"]');if(link){event.preventDefault();window.fixtureSms.push(link.href)}},true);
   window.addEventListener('click',event=>{const link=event.target.closest('a[href^="groundwire:"]');if(link){event.preventDefault();window.fixtureLaunches.push(link.getAttribute('href'))}},true);
  });
  page.on('pageerror',e=>errors.push(e.message));
  await context.route('**/api/**',route=>{
   const req=route.request(),url=new URL(req.url()),key=url.pathname.replace('/api/v2/','');
+  if(key==='call-history/seen'){
+   assert.ok(req.postDataJSON().records.every(r=>r.id&&typeof r.date==='number'));missedCount=0;
+   return route.fulfill({contentType:'application/json',body:JSON.stringify({count:0})});
+  }
   if(req.method()!=='GET'){writes.push(key);return route.abort()}
   const records=Array.from({length:15},(_,i)=>({id:'call-'+i,name:i%3===0?'演示联系人 '+(i+1):'',number:'55501'+String(i).padStart(2,'0'),deviceId:'server',slot:i%3===0?2:i%3===1?1:null,type:i%4===1?'missed':i%2?'incoming':'outgoing',date:Date.now()-i*4000000,duration:i%4?45:0}));
   const data={
    session:{installationId:installation,permissions:['calls.read','calls.dial','contacts.read']},
    devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · SIM 1',slot:1,lineOnline:true,online:true,confirmed:true}],
-   'groundwire/routes':{routes:[{lineId:'line-a',prefix:'*81*'}]},'voice/history':[],
+   'groundwire/routes':{routes:[{lineId:'line-a',prefix:'*81*'}]},'voice/history':[],'call-history/missed':{count:missedCount},
    'call-history':{items:records,next:null},contacts:{items:[{id:'c',name:'演示联系人',numbers:['5550100'],favorite:false,revision:1,sources:[]}],next:null}
   };
   assert.ok(key in data,'Unexpected API '+key);
@@ -33,9 +39,15 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
  await page.getByRole('button',{name:'拨打',exact:true}).waitFor();
  assert.equal(await page.locator('nav [aria-current=page]').innerText(),'拨号键盘');
+ await page.locator('.missed-badge').waitFor();
+ assert.equal(await page.locator('.missed-badge').innerText(),'4');
+
  await page.screenshot({path:path.join(out,'home-keypad.png')});
  await page.locator('nav button').filter({hasText:'通话'}).click();
  await page.getByRole('button',{name:'筛选通话'}).waitFor();
+ await page.waitForFunction(()=>window.fixtureBadges.at(-1)===0);
+ assert.equal(await page.locator('.missed-badge').count(),0);
+
  const callRows=page.locator('.call-row-main');
  assert.ok((await callRows.nth(0).textContent()).includes('主机 · SIM 2 · 呼出'),await callRows.nth(0).textContent());
  assert.ok((await callRows.nth(1).textContent()).includes('主机 · SIM 1 · 未接来电'),await callRows.nth(1).textContent());
@@ -50,6 +62,17 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.locator('.call-row-main').first().click();await page.locator('.contact-sheet').waitFor();await page.waitForTimeout(350);
  await page.locator('.contact-sheet .history-entry').getByText('主机 · SIM 2',{exact:true}).waitFor();
  await page.screenshot({path:path.join(out,'poster.png')});
+ const actions=page.locator('.poster-actions');
+ assert.equal(await actions.locator('a,button').first().getAttribute('aria-label'),'给此号码发短信');
+ assert.equal(await actions.locator('a,button').nth(1).getAttribute('aria-label'),'拨打此号码');
+ assert.equal(await actions.getByRole('button',{name:'查看全部通话记录'}).count(),0);
+ const sms=actions.getByRole('button',{name:'给此号码发短信'});
+ const smsUrl=new URL(await sms.getAttribute('href'));assert.equal(smsUrl.port,'8443');assert.equal(new URLSearchParams(smsUrl.hash.slice(1)).get('compose'),'5550100');
+ await sms.click();assert.equal(await page.evaluate(()=>window.fixtureSms.length),1);
+
+ const sheet=page.locator('.contact-sheet');const sheetBox=await sheet.boundingBox();
+ await page.mouse.move(sheetBox.x+140,sheetBox.y+310);await page.mouse.down();await page.mouse.move(sheetBox.x+188,sheetBox.y+312,{steps:4});await page.mouse.up();await sheet.waitFor({state:'detached'});
+ await page.locator('.call-row-main').first().click();await page.locator('.contact-sheet').waitFor();await page.waitForTimeout(260);
  await page.getByRole('button',{name:'返回',exact:true}).click();await page.waitForTimeout(280);
  const swipe=page.locator('.call-swipe-front').first(),box=await swipe.boundingBox();
  await page.mouse.move(box.x+290,box.y+30);await page.mouse.down();await page.mouse.move(box.x+135,box.y+30,{steps:14});await page.mouse.up();await page.waitForTimeout(350);
@@ -105,6 +128,6 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.getByRole('button',{name:'筛选通话'}).waitFor();
  assert.equal(await page.locator('.call-row-main').count(),4,'Notification deep link must still show missed calls');
  assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
- console.log('PASS keypad home and missed-call deep link, lower dock without dialer overflow, call list/detail recorded SIMs and unknown slots, Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
+ console.log('PASS message-before-call actions, short center back swipe, missed badge/view receipts, keypad home and missed-call deep link, lower dock without dialer overflow, call list/detail recorded SIMs and unknown slots, Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

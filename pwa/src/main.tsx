@@ -21,6 +21,7 @@ import {useNavigation} from './navigation';
 import {useContextMotion} from './contextMotion';
 import {useMessageMenu,type MessageMenuTrigger} from './messageMenu';
 import {useViewport} from './viewport';
+import {composeRecipient} from './composeLink';
 
 const EMPTY:Sms[]=[];
 
@@ -130,13 +131,15 @@ function App(){
  const title=current.find(m=>m.name)?.name||formatPhone(active||'',region);
  async function openConversation(address:string){const latest=[...(conversations.get(address)||[])].reverse().find(m=>m.incoming);if(latest){const last=sims.find(s=>s.id===latest.sim);setSim(last?lineKey(last):'unavailable')};setActive(address);setScreen('chat');setError('');const time=Date.now();setRows(prev=>prev.map(m=>keyOf(m.address)===address?{...m,read:true}:m));try{await api('read',{address:rows.find(m=>keyOf(m.address)===address)?.address||address,time:String(time)});if(meta.get(address)?.unread)await changeConversation(address,'read')}catch(e){fail(e)}}
  // Fragments never travel to the server. Clear the sender from browser history after reading it.
- const [notificationAddress,setNotificationAddress]=useState<string|null>(null);
+ const [notificationAddress,setNotificationAddress]=useState<string|null>(null),[composeAddress,setComposeAddress]=useState<string|null>(null);
  useEffect(()=>{
   const readTarget=()=>{
    const sender=new URLSearchParams(location.hash.slice(1)).get('conversation');
-   if(!sender)return;
+   const recipient=composeRecipient(location.hash);
+   if(!sender&&!recipient)return;
    history.replaceState(history.state,'',location.pathname+location.search);
-   if(sender.length<=100)setNotificationAddress(sender);
+   if(recipient)setComposeAddress(recipient);
+   else if(sender&&sender.length<=100)setNotificationAddress(sender);
   };
   readTarget();window.addEventListener('hashchange',readTarget);
   return ()=>window.removeEventListener('hashchange',readTarget);
@@ -146,6 +149,10 @@ function App(){
   setNotificationAddress(null); setDraft(''); setSheet(false);setDetails(null);
   void openConversation(keyOf(notificationAddress));
  },[notificationAddress,paired,metadataReady]);
+ useEffect(()=>{
+  if(!paired||!metadataReady||!composeAddress)return;
+  const address=composeAddress;setComposeAddress(null);newMessage();setRecipient(address);
+ },[composeAddress,paired,metadataReady]);
  async function saveName(kind:'phones'|'sims',id:string,name:string):Promise<string>{
   await api(kind,{id,name});
   const [devices,lines]=await Promise.all([api<Phone[]>('phones'),api<SimLine[]>('sims')]);

@@ -21,10 +21,10 @@ const server=http.createServer((req,res)=>{
    const data={
     session:{installationId:'test',permissions:['contacts.read','calls.read','contacts.write']},
     devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · A',online:true,confirmed:true}],
-    'voice/status':{ready:false,reason:'测试：语音未配置'},'voice/history':[],contacts:{items:[row],next:null},
+    'call-history/missed':{count:0},'call-history/seen':{count:0},'voice/history':[],contacts:{items:[row],next:null},
     'contact-sync/jobs':{items:[]},'call-history':{items:[{id:'record1',name:'合成联系人',number:'5550100',deviceId:'server',type:'missed',date:1720000000000,duration:0}],next:null},
    };
-   if(req.method()!=='GET')writes.push([endpoint,req.postDataJSON()]);
+   if(req.method()!=='GET'&&endpoint!=='call-history/seen')writes.push([endpoint,req.postDataJSON()]);
    if(!(endpoint in data)&&endpoint!=='contacts/edit')throw Error('Unexpected fixture path '+endpoint);
    return route.fulfill({contentType:'application/json',body:JSON.stringify(data[endpoint]||{id:'demo'})});
  });

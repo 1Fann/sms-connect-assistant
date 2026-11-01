@@ -4,6 +4,7 @@ import {formatPhone,identity} from '../phone';
 import {PhoneIcon,PhoneAvatar} from './PhoneIcon';
 import {DetailSheet} from './DetailSheet';
 import {callSourceLabel} from './callSource';
+import {messagesComposeLink} from '../composeLink';
 type Row=CallRecord&{key:string,source:'android'|'pbx'};
 const types:Record<string,string>={incoming:'呼入',outgoing:'呼出',missed:'未接来电',rejected:'已拒接',blocked:'已拦截',other:'通话'};
 function dateLabel(value:number){
@@ -34,7 +35,7 @@ function SwipeRow({row,device,editing,chosen,toggle,open,remove,dial,openKey,onO
   </div>
  </div>;
 }
-export function Recent({devices,dial,installation,query,searching,settings,contacts}:{devices:Device[],dial:(n:string)=>void,installation:string,query:string,searching:boolean,settings:()=>void,contacts:()=>void}){
+export function Recent({devices,dial,installation,query,searching,settings,contacts,onSeen}:{devices:Device[],dial:(n:string)=>void,installation:string,query:string,searching:boolean,settings:()=>void,contacts:()=>void,onSeen:(count:number)=>void}){
  const [mode,setMode]=useState<'all'|'missed'|'removed'>(location.hash==='#missed'?'missed':'all'),[filter,setFilter]=useState(''),[rows,setRows]=useState<CallRecord[]>([]),[pbx,setPbx]=useState<PbxCall[]>([]);
  const [next,setNext]=useState<number|null>(null),[offset,setOffset]=useState(0),[detail,setDetail]=useState<Row|null>(null),[history,setHistory]=useState(false),[error,setError]=useState(''),[reload,refresh]=useState(0);
  const [openKey,setOpenKey]=useState<string|null>(null);
@@ -54,6 +55,21 @@ export function Recent({devices,dial,installation,query,searching,settings,conta
  const all:Row[]=[...rows.map(r=>({...r,key:'android:'+r.deviceId+':'+r.id,source:'android' as const})),...(!filter?pbx.map(c=>({id:c.id,key:'pbx:'+c.id,source:'pbx' as const,deviceId:c.device,slot:c.slot,number:c.number,date:c.created,duration:c.answeredAt?Math.max(0,Math.floor(((c.endedAt||Date.now())-c.answeredAt)/1000)):0,type:c.direction==='incoming'?(c.answeredAt||c.state!=='CALL_ENDED'?'incoming':'missed'):'outgoing'})):[])].sort((a,b)=>b.date-a.date);
  const sourceLabel=(row:Row)=>callSourceLabel(row,devices)+(row.source==='pbx'?' · 互联通话':'');
  const visible=all.filter(r=>(mode==='removed'?hidden.includes(r.key):!hidden.includes(r.key))&&(mode!=='missed'||r.type==='missed')&&(!query||(r.name||'').toLowerCase().includes(query.toLowerCase())||r.number.replace(/\s/g,'').includes(query.replace(/\s/g,''))));
+ const seen=useRef(new Set<string>());
+ const missedVisible=mode==='removed'?[]:visible.filter(r=>r.source==='android'&&r.type==='missed');
+ const missedKey=JSON.stringify(missedVisible.map(r=>({id:r.id,date:r.date})));
+ useEffect(()=>{
+  let alive=true,timer:ReturnType<typeof setTimeout>|undefined;
+  const entries=(JSON.parse(missedKey) as {id:string,date:number}[]).filter(r=>!seen.current.has(r.id+':'+r.date));
+  if(!entries.length)return;
+  const run=async()=>{try{
+   const result=await api<{count:number}>('call-history/seen',{records:entries});for(const r of entries)seen.current.add(r.id+':'+r.date);
+   if(alive)onSeen(result.count);
+  }catch{if(alive)timer=setTimeout(()=>void run(),8000)}};
+  if(!document.hidden)void run();
+  return()=>{alive=false;if(timer)clearTimeout(timer)};
+ },[missedKey,onSeen]);
+ const smsLink=detail?messagesComposeLink(detail.number,location.origin):undefined;
  const title=mode==='removed'?'最近移除':mode==='missed'?'未接来电':'通话';
  const same=detail?all.filter(r=>detail.number?identity(r.number)===identity(detail.number):r.key===detail.key):[];
  function remove(ids:string[]){setHidden(old=>{const next=[...new Set([...old,...ids])];localStorage.setItem(storage,JSON.stringify(next));return next});setSelected([]);setEditing(false);setOpenKey(null)}
@@ -71,7 +87,7 @@ export function Recent({devices,dial,installation,query,searching,settings,conta
  {!visible.length&&<div className="phone-empty"><PhoneIcon name={searching?'search':'calls'} size={46}/><h2>{query?'无结果':mode==='removed'?'没有已移除记录':'暂无通话'}</h2><p>{query?'请尝试其他姓名或号码':'共享安卓通话记录后会显示在这里'}</p></div>}
  {next!==null&&<button className="load-more" onClick={()=>setOffset(next)}>载入更多</button>}
  {editing&&selected.length>0&&<div className="selection-bar"><span>已选择 {selected.length} 项</span><button className="danger" onClick={()=>mode==='removed'?(hiddenChange(hidden.filter(id=>!selected.includes(id))),setSelected([]),setEditing(false)):remove(selected)}>{mode==='removed'?'恢复':'从助手移除'}</button></div>}
- {detail&&<DetailSheet name={detail.name||formatPhone(detail.number)||'匿名来电'} subtitle={sourceLabel(detail)} onClose={()=>{setDetail(null);setHistory(false)}} actions={<><button aria-label="拨打此号码" disabled={!detail.number} onClick={()=>{dial(detail.number);setDetail(null)}}><PhoneIcon name="phone"/></button><button aria-label="查看全部通话记录" onClick={()=>setHistory(true)}><PhoneIcon name="clock"/></button></>}>
+ {detail&&<DetailSheet name={detail.name||formatPhone(detail.number)||'匿名来电'} subtitle={sourceLabel(detail)} onClose={()=>{setDetail(null);setHistory(false)}} actions={<><a role="button" aria-label="给此号码发短信" aria-disabled={!smsLink} href={smsLink} onClick={e=>{if(!smsLink)e.preventDefault()}}><PhoneIcon name="message"/></a><button aria-label="拨打此号码" disabled={!detail.number} onClick={()=>{dial(detail.number);setDetail(null)}}><PhoneIcon name="phone"/></button></>}>
   <button className="poster-row" onClick={()=>setHistory(!history)}><b>通话记录</b><PhoneIcon name="back" size={16}/></button>
   <div className="poster-card">{(history?same:[detail]).map(r=><div className="history-entry" key={r.key}><div><b>{types[r.type]||r.type}</b><small>{sourceLabel(r)}</small><small>{r.duration?Math.floor(r.duration/60)+' 分 '+r.duration%60+' 秒':r.type==='missed'?'未接听':'未记录时长'}</small></div><time>{new Date(r.date).toLocaleString('zh-CN')}</time></div>)}</div>
   {detail.number&&<button className="poster-card number-card" onClick={()=>{dial(detail.number);setDetail(null)}}><span><small>电话 · {sourceLabel(detail)}</small>{formatPhone(detail.number)}</span><PhoneIcon name="phone" size={20}/></button>}

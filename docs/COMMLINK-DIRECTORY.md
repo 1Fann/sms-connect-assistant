@@ -33,3 +33,8 @@ Each Android participant explicitly enables contact reading, contact writing and
 Directory v1 uses a new SQLite file. It preserves updates and tombstones with per-link sequence acknowledgements. A failed or unexpectedly empty Provider query does not wipe the address book. Cards match verified full telephone identities, preserve each source and expose ambiguous names for review. Android call records preserve origin and identifiers; independently observed PBX events are not joined by telephone number and timestamp alone.
 
 The three SQLite host contract checks run with `python tests/directory_sync_sql_test.py`. The Android directory integration tests use synthetic records and an isolated database. ContactsProvider behavior for OEM/account combinations, restricted call-log permission and real dual-device writeback still require explicitly authorized device tests.
+
+
+## v2 · 未接来电查看状态
+
+0.9.0-dev9 起，独立目录库升级到 v2，增加 call_seen(installation,device,raw,date) 主键表。GET /api/v2/call-history/missed 返回当前电话安装及获授权设备的未查看数量；POST /api/v2/call-history/seen 接收 records:[{id,date}]，只标记匹配日期且获授权的未接记录。两者需要 calls.read；不修改 Android CallLog。不同安装互不影响，原始 ID 被重用但日期改变时仍视为新事件。表结构迁移不触及短信、配对、联系人或原通话记录。

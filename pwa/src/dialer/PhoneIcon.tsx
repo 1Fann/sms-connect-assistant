@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-export type PhoneIconName='calls'|'person'|'keypad'|'search'|'back'|'close'|'plus'|'filter'|'phone'|'delete'|'info'|'trash'|'clock'|'settings'|'arrow'|'check'|'mute'|'speaker'|'handoff'|'hold';
+export type PhoneIconName='calls'|'person'|'keypad'|'search'|'back'|'close'|'plus'|'filter'|'phone'|'delete'|'info'|'trash'|'clock'|'settings'|'message'|'arrow'|'check'|'mute'|'speaker'|'handoff'|'hold';
 const paths:Record<PhoneIconName,ReactNode>={
  calls:<><circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="M12 5v7H7" stroke="var(--icon-cutout,#fff)" strokeWidth="1.7"/></>,
  person:<><circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="3.1" fill="var(--icon-cutout,#fff)" stroke="none"/><path d="M5.5 18c.6-3.4 3.1-5 6.5-5s5.9 1.6 6.5 5c-3.5 2.5-9.5 2.5-13 0" fill="var(--icon-cutout,#fff)" stroke="none"/></>,
@@ -12,6 +12,7 @@ const paths:Record<PhoneIconName,ReactNode>={
  info:<><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7" r="1" fill="currentColor" stroke="none"/></>,
  trash:<><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></>,
  clock:<><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></>,
+ message:<path d="M21 11.5c0 4.7-4 8.5-9 8.5-1.5 0-3-.3-4.2-.9L3 21l1.3-4.1A8.1 8.1 0 0 1 3 12c0-4.7 4-8.5 9-8.5s9 3.6 9 8Z" fill="currentColor" stroke="none"/>,
  settings:<><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3M4 4l2 2m12 12 2 2M4 20l2-2M18 6l2-2"/></>,
  arrow:<path d="M5 19 19 5M7 5h12v12"/>,check:<path d="m5 12 4.5 5L20 6"/>,
  mute:<><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v4M3 3l18 18"/></>,

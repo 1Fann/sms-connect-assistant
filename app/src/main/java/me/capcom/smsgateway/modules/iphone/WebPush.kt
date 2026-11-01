@@ -69,11 +69,27 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
                     .put("body","这是短信预览测试").put("badge",false).toString().toByteArray()
                 else inputData.getByteArray("preview")?.let { runCatching { SecretVault(applicationContext).open(it) }.getOrNull() }
             }
-            for(subscription in store.subscriptions()) {
+            val test=inputData.getBoolean("test",false)
+            val device=inputData.getString("device")
+            for(subscription in store.subscriptions("sms",device.orEmpty())) {
+                val scopes=subscription.grants.split(',')
+                if(test && inputData.getString("installation")!=null && subscription.installation!=inputData.getString("installation"))continue
+                // Jobs from 0.8.9 have no source field. Only an install with access to both legacy sources can receive them.
+                if(!test && device==null && !scopes.containsAll(listOf("device:server","device:peer")))continue
                 // Recheck on execution and retry: the conversation may have been
                 // muted while offline.
-                if(!PushPolicy.allowed(inputData.getString("address"),store.conversations(),inputData.getBoolean("test",false))) return@withContext Result.success()
-                try { when(val status=WebPush(applicationContext).send(subscription, if(subscription.publicKey != null) preview else null)) {
+                if(!PushPolicy.allowed(inputData.getString("address"),store.scopedStates(PrivateStore.smsScope(subscription.grants)),inputData.getBoolean("test",false))) continue
+                try {
+                    val content=if(subscription.publicKey==null)null else preview?.let { raw ->
+                        if(test)raw else runCatching {
+                            val json=org.json.JSONObject(String(raw,Charsets.UTF_8))
+                            val name=if("contacts.read" !in scopes) SmsHistory(applicationContext,store).format(json.optString("address")) else me.capcom.smsgateway.modules.directory.DirectoryService.get(applicationContext)
+                                .resolveName(json.optString("address")) { "device:"+it in scopes }
+                            if(name!=null)json.put("title",name)
+                            json.toString().toByteArray()
+                        }.getOrDefault(raw)
+                    }
+                    when(val status=WebPush(applicationContext).send(subscription,content)) {
                     404,410 -> {
                         store.removeSubscription(subscription.endpoint);permanent=true
                         applicationContext.getSharedPreferences("iphone",0).edit().putString("push-status","推送订阅已失效，请在 iPhone 重新订阅").apply()
@@ -95,14 +111,14 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         } else Result.success()
     }
     companion object {
-        private fun messageData(context: Context, address: String, body: String?, name: String?): Data {
-            val data = Data.Builder().putString("address",address.take(100))
+        private fun messageData(context: Context, address: String, body: String?, name: String?,device:String): Data {
+            val data = Data.Builder().putString("device",device).putString("address",address.take(100))
             PrivateStore(context).use { store ->
-                if(body != null && store.subscriptions().any { it.publicKey != null }) {
+                if(body != null && store.subscriptions("sms",device).any { it.publicKey != null }) {
                     // Keep only an encrypted, bounded snapshot in WorkManager, tied to this receipt.
                     val sealed = runCatching {
                         val history = SmsHistory(context, store)
-                        val title = name ?: history.contact(address) ?: history.format(address)
+                        val title = name ?: (if(device=="server")history.contact(address) else null) ?: history.format(address)
                         val payload = org.json.JSONObject().put("title",title.take(100))
                             .put("body",body.take(200)).put("address",PhoneIdentity.normalize(address).take(100))
                         SecretVault(context).seal(payload.toString().toByteArray())
@@ -112,11 +128,10 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
             }
             return data.build()
         }
-        fun enqueuePeer(context:Context,address:String,event:String,row:SmsRow?) {
+        fun enqueuePeer(context:Context,address:String,event:String,row:SmsRow?,device:String) {
             if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
-            if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return
             val operation=WorkManager.getInstance(context).enqueueUniqueWork("iphone-push-"+event,ExistingWorkPolicy.KEEP,
-                OneTimeWorkRequestBuilder<WebPushWorker>().setInputData(messageData(context,address,row?.body,row?.name))
+                OneTimeWorkRequestBuilder<WebPushWorker>().setInputData(messageData(context,address,row?.body,row?.name,device))
                     .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build())
             // Called only from the IO service loop. Keep the journal until WorkManager
@@ -132,10 +147,9 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         }
         fun enqueue(context: Context, address: String, body: String) {
             if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
-            if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return
-            queue(context,messageData(context,address,body,null),false)
+            queue(context,messageData(context,address,body,null,"server"),false)
         }
-        fun enqueueTest(context: Context) = queue(context,workDataOf("test" to true),true)
+        fun enqueueTest(context: Context, installation:String) = queue(context,workDataOf("test" to true,"installation" to installation),true)
         private fun queue(context: Context,data: Data,test: Boolean) {
             // KEEP could drop an unmuted message arriving behind a muted job.
             WorkManager.getInstance(context).enqueueUniqueWork(if(test)"iphone-push-test" else "iphone-push",if(test)ExistingWorkPolicy.KEEP else ExistingWorkPolicy.APPEND_OR_REPLACE,

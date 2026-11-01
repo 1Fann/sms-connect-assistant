@@ -2,6 +2,10 @@
 
 [中文](INSTALL.zh-CN.md) | English | [Home](../README.en.md)
 
+## CommLink development build
+
+Keep the existing SMS HTTPS origin on port 8443. Install Phone separately from the same hostname on port 8444 at `/phone/`; the client network needs access to that port. Approve each installation's features and device list on the Android host. Contact and call-log sharing require separate consent on each source phone. See the [upgrade guide](COMMLINK-UPGRADE.md) and [voice setup](VOICE.en.md).
+
 ## Initial Android setup
 
 Open Settings → Configuration checks and recovery (`配置检查与自动恢复`). Select the app as the default SMS handler, grant SMS/SIM/notification permissions, and exempt it from battery optimization. Contacts access is optional and enables contact names. On MIUI, separately allow autostart and unrestricted battery use; locking the app in Recents may help. Keep MIUI optimization enabled. Setting names and behavior vary by ROM.

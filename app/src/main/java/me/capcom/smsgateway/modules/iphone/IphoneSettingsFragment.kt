@@ -50,10 +50,28 @@ class IphoneSettingsFragment : me.capcom.smsgateway.ui.settings.BasePreferenceFr
         action("关闭公网服务") { ctx.getSharedPreferences("iphone",0).edit().putBoolean("enabled",false).apply(); ctx.stopService(Intent(ctx, IphoneService::class.java)); render() }
         action("生成三分钟配对码") { AlertDialog.Builder(ctx).setTitle("配对码").setMessage(IphoneService.newCode()).setPositiveButton("确定",null).show() }
         action("确认待配对的 iPhone", IphoneService.pending().ifEmpty { "暂无请求；在 iPhone 输入配对码后刷新" }) {
-            if(IphoneService.pending().isNotEmpty()) AlertDialog.Builder(ctx).setTitle("允许此设备访问全部短信并付费发送？").setMessage(IphoneService.pending()).setPositiveButton("允许") { _,_->IphoneService.approve(); render() }.setNegativeButton("取消",null).show()
+            val ticket=IphoneService.ticket()
+            val phone=IphoneService.requestedApp()=="phone"
+            if(IphoneService.pending().isNotEmpty())chooseAccess(phone,null) { allowed->IphoneService.approve(ticket,allowed);render() }
         }
+        action("管理已授权安装", "调整单个安装可访问的设备、功能或撤销权限") {
+            val installs=PrivateStore(ctx).use { it.installations() }
+            AlertDialog.Builder(ctx).setTitle("选择安装实例").setItems(installs.map { (if(it.app=="phone") "互联电话" else "互联信息")+" · "+it.name+" · "+it.installation.takeLast(4) }.toTypedArray()) { _,i->
+                val item=installs[i]
+                AlertDialog.Builder(ctx).setTitle(item.name).setItems(arrayOf("更改权限","撤销授权")) { _,choice->
+                    if(choice==0)chooseAccess(item.app=="phone",item.grants.split(',').toSet()) { allowed->
+                        PrivateStore(ctx).use{it.updateGrants(item.installation,allowed)};render()
+                    } else AlertDialog.Builder(ctx).setMessage("撤销此安装的访问与通知？")
+                        .setPositiveButton("撤销"){_,_->PrivateStore(ctx).use { it.revokeInstallation(item.installation) };render()}
+                        .setNegativeButton("取消",null).show()
+                }.show()
+            }.show()
+        }
+        action("通讯录与通话记录权限") { startActivity(Intent(ctx,me.capcom.smsgateway.modules.directory.DirectoryAccessActivity::class.java)) }
+        action("SIP 服务 · Groundwire") { startActivity(Intent(ctx,me.capcom.smsgateway.modules.voice.VoiceSetupActivity::class.java)) }
+        action("互联电话安装地址", "在 Safari 打开同一 HTTPS 域名的 8444 端口 /phone/，从分享菜单添加到主屏幕。"+PhoneServer.status) {}
         action("已配对设备 / 全部撤销", PrivateStore(ctx).use { it.devices().joinToString("\n").ifEmpty { "无；会话 12 小时后失效" } }) {
-            AlertDialog.Builder(ctx).setMessage("撤销全部 iPhone 的短信访问权限？").setPositiveButton("撤销") { _,_->PrivateStore(ctx).use { it.revoke() }; render() }.setNegativeButton("取消",null).show()
+            AlertDialog.Builder(ctx).setMessage("撤销全部互联信息和互联电话安装的访问权限？").setPositiveButton("撤销") { _,_->PrivateStore(ctx).use { it.revoke() }; render() }.setNegativeButton("取消",null).show()
         }
         action("复制访问网址", "https://${ctx.getSharedPreferences("iphone",0).getString("host","sms.example.com")}:8443") {
             (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("短信", "https://${ctx.getSharedPreferences("iphone",0).getString("host","sms.example.com")}:8443"))
@@ -62,6 +80,24 @@ class IphoneSettingsFragment : me.capcom.smsgateway.ui.settings.BasePreferenceFr
         action("MIUI 14 设置指引", "开启自启动，电池策略设为无限制，在最近任务中锁定应用。路由器仅放行 IPv6 TCP 8443；不要放行原网关管理端口。公网连通性必须从其他 IPv6 网络实测。现有 DDNS 保持不变。") {}
         action("当前版本限制", "Cloudflare DNS-01、续期与 Web Push 需真机验证。推送不含短信正文。不要将此构建当成已完成全部验收的正式版。") {}
     }
+    private fun chooseAccess(phone:Boolean,previous:Set<String>?,save:(Set<String>)->Unit) {
+        val nodes=PeerHub.get(requireContext()).devices()
+        val features=if(phone) listOf("contacts.read","contacts.write","calls.read","calls.dial") else listOf("sms.read","sms.send","contacts.read")
+        val keys=features+nodes.map { "device:"+it["deviceId"].toString() }
+        val names=if(phone) listOf("读取通讯录","编辑指定来源联系人","读取通话记录","允许付费拨号及接续") else listOf("读取短信","发送短信","搜索授权设备通讯录")
+        val choices=(names+nodes.map { "允许设备 · "+it["name"].toString() }).toTypedArray()
+        val selected=BooleanArray(keys.size) { i->previous?.contains(keys[i]) ?: (keys[i].endsWith(".read")||keys[i]=="device:server") }
+        AlertDialog.Builder(requireContext()).setTitle(if(phone)"互联电话授权" else "互联信息授权")
+            .setMultiChoiceItems(choices,selected){_,i,value->selected[i]=value}
+            .setPositiveButton("保存"){_,_->
+                val allowed=keys.filterIndexed { i,_->selected[i] }.toMutableSet()
+                if("contacts.write" in allowed)allowed.add("contacts.read")
+                if("calls.dial" in allowed)allowed.add("calls.read")
+                if(!phone)allowed.add("sms.read")
+                save(allowed)
+            }.setNegativeButton("取消",null).show()
+    }
+
     @Deprecated("Android activity result compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode,resultCode,data)

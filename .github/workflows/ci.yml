@@ -12,7 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check durable delivery journals without a phone
-        run: python3 tests/delivery_journal_test.py
+        run: |
+          python3 tests/delivery_journal_test.py
+          python3 tests/directory_sync_sql_test.py
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -22,6 +24,8 @@ jobs:
           npm install --global pnpm@11.0.0
           pnpm install --frozen-lockfile
           pnpm test
+          node tests/push-preview.cjs
+          node tests/dual-shell.cjs
           pnpm build
       - uses: actions/setup-java@v4
         with:

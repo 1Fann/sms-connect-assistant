@@ -512,7 +512,8 @@ class MessagesService(
         val id = message.id
 
         val simNumber = selectSimNumber(request.id, request.params)
-        val smsManager: SmsManager = getSmsManager(simNumber)
+        val expectedSub = if ((id.startsWith("iphone:") || id.startsWith("peer:")) && simNumber != null) me.capcom.smsgateway.modules.iphone.PeerHub.get(context).expectedSub(id,simNumber+1) else null
+        val smsManager: SmsManager = getSmsManager(simNumber,expectedSub)
 
         if (request.params.simNumber == null && simNumber != null) {
             dao.updateSimNumber(id, simNumber + 1)
@@ -645,7 +646,7 @@ class MessagesService(
     }
 
     @SuppressLint("NewApi")
-    private fun getSmsManager(simNumber: Int?): SmsManager {
+    private fun getSmsManager(simNumber: Int?, expectedSub: Int? = null): SmsManager {
         return if (simNumber != null) {
             if (ActivityCompat.checkSelfPermission(
                     context,
@@ -659,7 +660,7 @@ class MessagesService(
                 ?: throw UnsupportedOperationException("SIM selection available from API 22")
 
             subscriptionManager.activeSubscriptionInfoList.orEmpty().find {
-                it.simSlotIndex == simNumber
+                it.simSlotIndex == simNumber && (expectedSub==null || it.subscriptionId==expectedSub)
             }?.let {
                 if (Build.VERSION.SDK_INT < 31) {
                     @Suppress("DEPRECATION")

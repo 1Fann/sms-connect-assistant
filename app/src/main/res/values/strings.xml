@@ -2,7 +2,7 @@
     <string name="address_is">%1$s</string>
     <string name="api_url_private_token_credentials_etc">API URL, private token, credentials, etc.</string>
     <string name="api_url">API URL</string>
-    <string name="app_name" translatable="false">短信互联助手</string>
+    <string name="app_name" translatable="false">通讯互联</string>
     <string name="app_version_build">App version (build)</string>
     <string name="automatic_key_rotation">Automatic key rotation</string>
     <string name="battery_optimization_already_disabled">Battery optimization already disabled</string>
@@ -57,7 +57,7 @@
     <string name="listening_to_the_server_events">Listening to server events…</string>
     <string name="local_address">Local address</string>
     <string name="local_server_dotdotdot">Local Server…</string>
-    <string name="local_sms_gateway_notifications">Local 短信互联助手 notifications</string>
+    <string name="local_sms_gateway_notifications">Local 通讯互联 notifications</string>
     <string name="local">Local</string>
     <string name="login_code_expires">Login Code, expires %1$s</string>
     <string name="login_code">Login Code</string>
@@ -117,8 +117,8 @@
     <string name="sign_in">Sign In</string>
     <string name="sign_up">Sign Up</string>
     <string name="signing_key">Signing Key</string>
-    <string name="sms_gateway_is_running_on_port">短信互联助手 is running on port %1$d</string>
-    <string name="sms_gateway">短信互联助手</string>
+    <string name="sms_gateway_is_running_on_port">通讯互联 is running on port %1$d</string>
+    <string name="sms_gateway">通讯互联</string>
     <string name="sms" translatable="false">sms</string>
     <string name="success_long_press_to_copy">Success, long press to copy</string>
     <string name="system">System</string>

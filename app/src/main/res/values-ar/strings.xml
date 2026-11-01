@@ -47,7 +47,7 @@
     <string name="listening_to_the_server_events">الاستماع لأحداث الخادم…</string>
     <string name="local_address">العنوان المحلي</string>
     <string name="local_server_dotdotdot">خادم محلي…</string>
-    <string name="local_sms_gateway_notifications">إشعارات 短信互联助手 المحلية</string>
+    <string name="local_sms_gateway_notifications">إشعارات 通讯互联 المحلية</string>
     <string name="local">محلي</string>
     <string name="login_code_expires">تنتهي صلاحية كود الدخول في %1$s</string>
     <string name="login_code">كود الدخول</string>
@@ -99,8 +99,8 @@
     <string name="sign_in">تسجيل الدخول</string>
     <string name="sign_up">إنشاء حساب</string>
     <string name="signing_key">مفتاح التوقيع</string>
-    <string name="sms_gateway_is_running_on_port">短信互联助手 يعمل على المنفذ %1$d</string>
-    <string name="sms_gateway">短信互联助手</string>
+    <string name="sms_gateway_is_running_on_port">通讯互联 يعمل على المنفذ %1$d</string>
+    <string name="sms_gateway">通讯互联</string>
     <string name="success_long_press_to_copy">نجاح، اضغط مطولاً للنسخ</string>
     <string name="system">النظام</string>
     <string name="tab_text_home">الرئيسية</string>

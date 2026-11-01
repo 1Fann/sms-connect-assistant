@@ -55,7 +55,8 @@ const close=(actual,expected,label,tolerance=1.1)=>assert.ok(Math.abs(actual-exp
    const p=new URL(route.request().url()).pathname;let data={};
    if(p==='/api/history')data={items:rows,next:null};
    else if(p==='/api/outgoing'||p==='/api/contacts'||p==='/api/conversations'&&route.request().method()==='GET')data=[];
-   else if(p==='/api/sims')data=[{id:1,name:'合成线路'}];
+   else if(p==='/api/phones')data=[{id:'server',name:'测试主机'}];
+   else if(p==='/api/sims')data=[{id:1,name:'合成线路',phoneId:'server',phoneName:'测试主机',slot:1,simName:'合成线路',online:true}];
    else if(p==='/api/read'){assert.equal(route.request().postDataJSON().address,address);reads++}
    else if(p!=='/api/status'){
     violations.push('unexpected API '+p);await route.fulfill({status:405,contentType:'application/json',body:'{"error":"Keyboard checks never send or change messages"}'});return;

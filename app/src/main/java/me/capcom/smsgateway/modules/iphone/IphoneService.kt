@@ -31,6 +31,9 @@ class IphoneService : Service() {
     private val messages: MessagesService by inject()
     private val notifications: NotificationsService by inject()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val directory by lazy { me.capcom.smsgateway.modules.directory.DirectoryService.get(this) }
+    private var directoryJob: Job? = null
+    private val phoneServer by lazy { PhoneServer(this,store,hub) }
     private var server: ApplicationEngine? = null
     private val starting = java.util.concurrent.atomic.AtomicBoolean(false)
     private val serverLock = Any()
@@ -44,6 +47,20 @@ class IphoneService : Service() {
     private val prefs by lazy { getSharedPreferences("iphone", 0) }
     private val pairingLimit = WindowLimit(10, 60_000)
     private val sendLimit = WindowLimit(6, 60_000)
+    private val smsGrant=io.ktor.util.AttributeKey<PrivateStore.Install>("sms-install")
+    private fun smsScope(c:ApplicationCall)=PrivateStore.smsScope(c.attributes[smsGrant].grants)
+    private fun nodes(c:ApplicationCall)=c.attributes[smsGrant].nodes()
+    private fun allows(c:ApplicationCall,id:String)=id in nodes(c)
+    private fun visibleAddresses(c:ApplicationCall):Set<String> {
+        val set=nodes(c)
+        return hub.visibleAddresses(set) + (if("server" in set)history.addresses() else emptySet())
+    }
+    private fun visibleStates(c:ApplicationCall,states:List<ConversationState>):List<ConversationState>{
+        if(states.isEmpty())return states
+        val addresses=visibleAddresses(c)
+        val keys=states.map { it.region }.distinct().associateWith { region->addresses.map { ConversationIdentity.key(it,region) }.toSet() }
+        return states.filter { it.address in addresses || ConversationIdentity.key(it.address,it.region) in keys[it.region].orEmpty() }
+    }
     private val apiLimit = WindowLimit(180, 60_000)
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -71,7 +88,15 @@ class IphoneService : Service() {
         if (starting.compareAndSet(false,true)) scope.launch {
             try {
                 messages.start(this@IphoneService)
-                synchronized(serverLock) { startServer() }; status = "HTTPS 已监听 [::]:8443；公网连通性未验证"
+                synchronized(serverLock) { startServer() }
+                runCatching { me.capcom.smsgateway.modules.voice.VoiceRuntime.get(this@IphoneService).start() }
+                directoryJob=scope.launch {
+                    while(isActive) {
+                        runCatching { directory.tickLocal("server") }
+                        delay(10_000)
+                    }
+                }
+                status= "HTTPS 已监听 [::]:8443；公网连通性未验证"
                 wakeLock = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"iphone:https").apply { acquire() }
                 while(isActive) { runCatching { hub.flushPush() }; delay(10_000); BridgeMonitor.check(this@IphoneService) }
             }
@@ -121,8 +146,10 @@ class IphoneService : Service() {
                     }
                     if (call.request.path().startsWith("/api/")) {
                         if (!apiLimit.allow()) { call.respond(HttpStatusCode.TooManyRequests); finish(); return@intercept }
-                        if (call.request.path() !in setOf("/api/pair","/api/pair/finish","/api/refresh") && !store.session(call.request.cookies["__Host-iphone"] ?: "")) {
-                            call.respond(HttpStatusCode.Unauthorized); finish(); return@intercept
+                        if (call.request.path() !in setOf("/api/pair","/api/pair/finish","/api/refresh")) {
+                            val grant=store.install(call.request.cookies["__Host-iphone"].orEmpty(),"sms")
+                            if(grant==null || !grant.allows("sms.read")) {call.respond(HttpStatusCode.Unauthorized); finish(); return@intercept}
+                            call.attributes.put(smsGrant,grant)
                         }
                     }
                 }
@@ -130,8 +157,13 @@ class IphoneService : Service() {
                     post("/peer/link") {
                         if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests)
                         val bearer=call.request.header("Authorization")?.removePrefix("Bearer ").orEmpty()
-                        if(!hub.pair(call.json()["code"].orEmpty(),bearer))return@post call.respond(HttpStatusCode.Forbidden)
-                        call.respond(mapOf("ok" to true))
+                        val body=call.json()
+                        val result=hub.requestLink(body["code"].orEmpty(),bearer,body["model"].orEmpty(),body["previous"].orEmpty())
+                        when(result) {
+                            "ok" -> call.respond(mapOf("status" to "ok","ok" to true))
+                            "pending" -> call.respond(HttpStatusCode.Accepted,mapOf("status" to "pending"))
+                            else -> call.respond(HttpStatusCode.Forbidden)
+                        }
                     }
                     post("/peer/sync") {
                         val bearer=call.request.header("Authorization")?.removePrefix("Bearer ").orEmpty()
@@ -164,38 +196,53 @@ class IphoneService : Service() {
                         call.respond(mapOf("ok" to true))
                     }
                     get("/api/status") { call.respond(mapOf("status" to status, "publicConnectivity" to "unverified", "addresses" to addresses(), "webPush" to true, "devices" to store.devices())) }
-                    get("/api/sims") { call.respond(SubscriptionsHelper.getActiveSimCards(this@IphoneService).map { labels.line(it.simNumber,true) } + hub.lines()) }
-                    get("/api/phones") { call.respond((if(hub.paired)listOf("server","peer") else listOf("server")).map { mapOf("id" to it,"name" to labels.phoneName(it)) }) }
+                    get("/api/sims") { call.respond(hub.allLines().filter { allows(call,it["deviceId"].toString()) }.map { it-"subscriptionId" }) }
+                    get("/api/phones") { call.respond(hub.devices().filter { allows(call,it["deviceId"].toString()) }) }
                     post("/api/phones") {
-                        val b=call.json();val id=b["id"]!!
-                        require(id=="server" || (id=="peer" && hub.paired))
-                        labels.renamePhone(id,b["name"]!!);call.respond(mapOf("ok" to true))
+                        val b=call.json();if(!allows(call,b["id"].orEmpty()))return@post call.respond(HttpStatusCode.Forbidden);hub.renameDevice(b["id"]!!,b["name"]!!);call.respond(mapOf("ok" to true))
                     }
-                    get("/api/contacts") { call.respond(history.contacts(call.request.queryParameters["q"] ?: "")) }
-                    get("/api/conversations") { call.respond(store.conversations()) }
-                    post("/api/conversations") { val b=call.json(); call.respond(store.updateConversation(b["address"]!!,b["action"]!!,b["region"] ?: "CN")) }
+                    get("/api/contacts") {
+                        if(!call.attributes[smsGrant].allows("contacts.read"))return@get call.respond(emptyList<Map<String,String>>())
+                        val q=call.request.queryParameters["q"].orEmpty()
+                        val merged=runCatching {
+                            val items=directory.contacts(q,0,{allows(call,it)}).getJSONArray("items")
+                            buildList { for(i in 0 until items.length()){
+                                val c=items.getJSONObject(i);val numbers=c.getJSONArray("numbers")
+                                for(j in 0 until numbers.length())add(mapOf("name" to c.getString("name"),"number" to numbers.getString(j)))
+                            } }
+                        }.getOrDefault(emptyList())
+                        val local=if(allows(call,"server"))history.contacts(q) else emptyList()
+                        call.respond((merged+local).distinctBy { PhoneIdentity.normalize(it["number"].orEmpty()) }.take(50)) }
+                    get("/api/conversations") { call.respond(visibleStates(call,store.scopedStates(smsScope(call)))) }
+                    post("/api/conversations") { val b=call.json(); val address=b["address"]!!; val region=b["region"]?:"CN"
+                        if(visibleAddresses(call).none { ConversationIdentity.key(it,region)==ConversationIdentity.key(address,region) })return@post call.respond(HttpStatusCode.Forbidden)
+                        call.respond(visibleStates(call,store.updateConversation(address,b["action"]!!,region,smsScope(call)))) }
                     post("/api/sims") {
                         val b=call.json();val id=b["id"]!!.toInt()
-                        require(id in 1..4 || (id in 101..104 && hub.paired))
-                        labels.renameSim(id,b["name"]!!);call.respond(mapOf("ok" to true))
+                        if(!allows(call,hub.deviceOfAlias(id).orEmpty()))return@post call.respond(HttpStatusCode.Forbidden)
+                        hub.renameLine(id,b["name"]!!);call.respond(mapOf("ok" to true))
                     }
                     get("/api/history") {
                         val cursors=call.request.queryParameters["before"]?.split("_").orEmpty()
-                        val local=history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200)
-                        val remote=hub.page(cursors.getOrNull(1)?.toLong()?:Long.MAX_VALUE).map { it.copy(read=it.read || it.date<=store.seen(it.address)) }
-                        fun next(rows:List<SmsRow>)=if(rows.size==200)rows.last().id.substringAfter(':') else "0"
-                        val cursor=if(local.size<200 && remote.size<200)null else next(local)+"_"+next(remote)
-                        call.respond(mapOf("items" to (local+remote), "next" to cursor))
+                        val local=if(!allows(call,"server"))emptyList() else history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200).map(hub::localHistory)
+                        val remote=hub.page(cursors.getOrNull(1)?.toLong()?:Long.MAX_VALUE,nodes(call)).map { it.copy(read=it.read || it.date<=store.seen(it.address)) }
+                        fun next(rows:List<SmsRow>, peer:Boolean=false)=if(rows.size!=200)"0" else if(peer)hub.pageCursor(rows.last().id).toString() else rows.last().id.substringAfter(':')
+                        val cursor=if(local.size<200 && remote.size<200)null else next(local)+"_"+next(remote,true)
+                        call.respond(mapOf("items" to (local+remote).let { rows ->
+                            val marks=store.scopedReadTimes(smsScope(call))
+                            val names=if(!call.attributes[smsGrant].allows("contacts.read"))emptyMap() else rows.map { it.address }.distinct().associateWith { runCatching { directory.resolveName(it){ d->allows(call,d) } }.getOrNull() }
+                            rows.map { r->r.copy(name=if(call.attributes[smsGrant].allows("contacts.read"))names[r.address]?:r.name else null, read=r.read || r.date<=(marks[r.address]?:0L)) }
+                        }, "next" to cursor))
                     }
                     get("/api/outgoing") {
-                        call.respond(store.recentRequests().mapNotNull { id -> messages.getMessage(id)?.let {
+                        call.respond((if(allows(call,"server"))store.recentRequests() else emptyList()).mapNotNull { id -> messages.getMessage(id)?.let {
                             val m=it.message
                             val address=it.recipients.firstOrNull()?.phoneNumber ?: return@let null
                             val result = messageState(id)
-                            SmsRow(id.removePrefix("iphone:"),address,history.format(address),history.contact(address),m.textContent?.text ?: "",m.createdAt,false,true,m.simNumber,result["state"]!!,error=result["error"])
-                        } } + hub.outgoing())
+                            SmsRow(id.removePrefix("iphone:"),address,history.format(address),if(call.attributes[smsGrant].allows("contacts.read"))runCatching { directory.resolveName(address){d->allows(call,d)} }.getOrNull() ?: history.contact(address) else null,m.textContent?.text ?: "",m.createdAt,false,true,hub.localSendAlias(id,m.simNumber),result["state"]!!,error=result["error"])
+                        } } + hub.outgoing(nodes(call)))
                     }
-                    post("/api/read") { val b=call.json(); store.markRead(PhoneIdentity.normalize(b["address"]!!), minOf(b["time"]!!.toLong(), System.currentTimeMillis())); call.respond(mapOf("ok" to true)) }
+                    post("/api/read") { val b=call.json(); if(visibleAddresses(call).none {PhoneIdentity.normalize(it)==PhoneIdentity.normalize(b["address"].orEmpty())})return@post call.respond(HttpStatusCode.Forbidden); store.markScopedRead(smsScope(call),PhoneIdentity.normalize(b["address"]!!), minOf(b["time"]!!.toLong(), System.currentTimeMillis())); call.respond(mapOf("ok" to true)) }
                     post("/api/logout") { store.logout(call.request.cookies["__Host-iphone"] ?: ""); call.response.header("Set-Cookie", "__Host-iphone=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"); call.respond(mapOf("ok" to true)) }
                     get("/api/push/key") { call.respond(mapOf("key" to WebPush(this@IphoneService).publicKey())) }
                     post("/api/push/preview/off") {
@@ -212,33 +259,41 @@ class IphoneService : Service() {
                         call.respond(mapOf("ok" to true))
                     }
                     post("/api/push/unsubscribe") { store.unsubscribe(call.request.cookies["__Host-iphone"]!!);call.respond(mapOf("ok" to true)) }
-                    post("/api/push/test") { if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests);WebPushWorker.enqueueTest(this@IphoneService);call.respond(mapOf("status" to "已排队；不代表已提交或设备已收到")) }
+                    post("/api/push/test") { if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests);WebPushWorker.enqueueTest(this@IphoneService,call.attributes[smsGrant].installation);call.respond(mapOf("status" to "已排队；不代表已提交或设备已收到")) }
                     get("/api/push/status") { call.respond(mapOf("status" to (prefs.getString("push-status",null) ?: "尚无提交结果"))) }
                     post("/api/send") {
+                        if(store.install(call.request.cookies["__Host-iphone"].orEmpty(),"sms")?.allows("sms.send")!=true)
+                            return@post call.respond(HttpStatusCode.Forbidden)
                         val b = call.json()
                         val id = "iphone:${b["id"]}"
                         require(b["id"]?.matches(Regex("[a-fA-F0-9-]{36}")) == true)
                         val number = PhoneIdentity.normalize(b["address"] ?: "")
                         val body = b["body"] ?: ""
-                        val sim = b["sim"]?.toInt()
+                        val lineId = b["lineId"]
+                        val selected = lineId?.let { requireNotNull(hub.line(it)) { "线路不存在" } }
+                        val sim = if(selected==null)b["sim"]?.toInt() else (selected["id"] as Number).toInt()
+                        if(sim==null || !allows(call,hub.deviceOfAlias(sim).orEmpty()))return@post call.respond(HttpStatusCode.Forbidden)
+                        require(selected==null || (selected["online"]==true && selected["confirmed"]==true))
                         require(number.matches(Regex("\\+?[0-9]{3,20}")) && body.isNotBlank() && body.length <= 2000)
-                        if(sim!=null && sim in 101..104){
+                        if(sim!=null && hub.isRemote(sim)){
                             if(!sendLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests)
-                            if(hub.sent(b["id"]!!)==null && hub.lines().none{it["id"]==sim && it["online"]==true})return@post call.respond(HttpStatusCode.ServiceUnavailable,mapOf("error" to "共享手机或所选线路离线"))
+                            if(hub.sent(b["id"]!!)==null && hub.allLines().none{it["id"]==sim && it["online"]==true})return@post call.respond(HttpStatusCode.ServiceUnavailable,mapOf("error" to "共享手机或所选线路离线"))
                             store.reserve(id,PrivateStore.hash("$number\u0000$sim\u0000$body"))
                             val row=hub.queue(b["id"]!!,number,body,sim)
                             return@post call.respond(HttpStatusCode.Accepted,mapOf("id" to row.id,"state" to row.state))
                         }
-                        require(sim != null && SubscriptionsHelper.getActiveSimCards(this@IphoneService).any { it.simNumber == sim })
+                        require(sim != null)
                         val fingerprint = PrivateStore.hash("$number\u0000$sim\u0000$body")
                         if(!sendLimit.allow()) return@post call.respond(HttpStatusCode.TooManyRequests)
-                        store.enqueueOnce(id,fingerprint,{messages.getMessage(id)!=null}) { messages.enqueueMessage(SendRequest(EntitySource.Local,
+                        store.enqueueOnce(id,fingerprint,{messages.getMessage(id)!=null}) { val slot=hub.bindLocalSend(id,sim,lineId); messages.enqueueMessage(SendRequest(EntitySource.Local,
                             Message(id, MessageContent.Text(body), listOf(number), false, Date()),
-                            SendParams(true, true, sim, null, null, null))) }
+                            SendParams(true, true, slot, null, null, null))) }
                         call.respond(HttpStatusCode.Accepted, messageState(id))
                     }
-                    get("/api/send/{id}") { val id=call.parameters["id"]!!; require(id.matches(Regex("[a-fA-F0-9-]{36}"))); call.respond(hub.sent(id)?.let {mapOf("id" to id,"state" to it.state)} ?: messageState("iphone:$id")) }
+                    get("/api/send/{id}") { val id=call.parameters["id"]!!; require(id.matches(Regex("[a-fA-F0-9-]{36}"))); call.respond(hub.sent(id,nodes(call))?.let {mapOf("id" to id,"state" to it.state)} ?: if(allows(call,"server"))messageState("iphone:$id") else mapOf("id" to id,"state" to "unknown")) }
                     get("/{path...}") {
+                        if(call.request.path()=="/phone" || call.request.path().startsWith("/phone/"))
+                            return@get call.respondRedirect("https://$host:8444/phone/")
                         val path = call.parameters.getAll("path")?.joinToString("/").orEmpty().ifBlank { "index.html" }
                         if(path.contains("..") || path.contains('\\')) return@get call.respond(HttpStatusCode.NotFound)
                         val bytes = try { assets.open("iphone/$path").use { it.readBytes() } } catch (_: Exception) { return@get call.respond(HttpStatusCode.NotFound) }
@@ -248,6 +303,8 @@ class IphoneService : Service() {
                 }
             }
         }) { requestQueueLimit = 32; runningLimit = 16; maxInitialLineLength = 4096; maxHeaderSize = 8192 }.start(false)
+        // The independent listener must never take down an already running SMS server.
+        phoneServer.restart(host,keyStore,alias,password)
     }
     private fun messageState(id: String): Map<String, String> {
         if(store.rejected(id))return mapOf("id" to id.removePrefix("iphone:"),"state" to "failed")
@@ -268,7 +325,7 @@ class IphoneService : Service() {
         }
         return result
     }
-    override fun onDestroy() { scope.cancel(); synchronized(serverLock) { server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
+    override fun onDestroy() { scope.cancel(); runCatching { me.capcom.smsgateway.modules.voice.VoiceRuntime.get(this).stop() }; synchronized(serverLock) { phoneServer.stop(); server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
     companion object {
         @Volatile var peerRunning=false
         const val ACTION_RECOVER = "me.capcom.smsgateway.iphone.RECOVER"
@@ -280,17 +337,26 @@ class IphoneService : Service() {
         private var expires = 0L
         private var pendingToken = ""
         private var pendingName = ""
+        private var pendingApp = "sms"
+        private var pendingInstall = ""
+        private var approvedScopes = ""
         private var approved = false
         @Synchronized fun newCode(): String { code=PrivateStore.token().take(12); expires=System.currentTimeMillis()+180_000; pendingToken=""; approved=false; return code }
-        @Synchronized fun requestPair(value: String, name: String): String? {
+        @Synchronized fun requestPair(value: String, name: String, app: String = "sms"): String? {
             if(value != code || code.isBlank() || System.currentTimeMillis()>expires || pendingToken.isNotEmpty()) return null
-            pendingToken=PrivateStore.token(); pendingName=name.take(60); code=""; return pendingToken
+            pendingToken=PrivateStore.token(); pendingName=name.take(60); pendingApp=app; pendingInstall=java.util.UUID.randomUUID().toString(); code=""; return pendingToken
         }
         @Synchronized fun pending(): String = if(pendingToken.isNotBlank() && System.currentTimeMillis()<expires) pendingName else ""
-        @Synchronized fun approve() { if(pending().isNotEmpty()) approved=true }
-        @Synchronized fun consumeApproval(token: String): String? {
-            if(!approved || token != pendingToken || pending().isEmpty()) return null
-            approved=false; pendingToken=""; return pendingName
+        @Synchronized fun requestedApp() = pendingApp
+        @Synchronized fun ticket() = pendingInstall
+        @Synchronized fun approve(installation: String, scopes: Set<String>) {
+            if(pending().isNotEmpty() && installation==pendingInstall && scopes.isNotEmpty()) {
+                approvedScopes=scopes.joinToString(","); approved=true
+            }
+        }
+        @Synchronized fun consumeApproval(token: String, app: String = "sms"): PrivateStore.Install? {
+            if(!approved || token != pendingToken || app != pendingApp || pending().isEmpty()) return null
+            approved=false; pendingToken=""; return PrivateStore.Install(pendingName,pendingApp,pendingInstall,approvedScopes)
         }
         fun start(context: Context) { val i=Intent(context, IphoneService::class.java); if(android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i) else context.startService(i) }
         fun addresses(): List<Map<String,String>> = NetworkInterface.getNetworkInterfaces().toList().flatMap { it.inetAddresses.toList() }.filterNot { it.isLoopbackAddress }.map {
@@ -299,11 +365,11 @@ class IphoneService : Service() {
     }
 }
 
-private suspend fun ApplicationCall.json(): Map<String,String> {
+internal suspend fun ApplicationCall.json(): Map<String,String> {
     val value = com.google.gson.JsonParser.parseString(limitedBody(16384)).asJsonObject
     return value.entrySet().associate { it.key to it.value.asString }
 }
-private suspend fun ApplicationCall.limitedBody(limit:Int):String {
+internal suspend fun ApplicationCall.limitedBody(limit:Int):String {
     require(request.contentType().match(ContentType.Application.Json))
     val channel = receiveChannel()
     val out = java.io.ByteArrayOutputStream()

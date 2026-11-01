@@ -4,6 +4,10 @@ plugins {
     id 'com.google.devtools.ksp'
 }
 
+if (project.hasProperty("commLinkFixture")) {
+    layout.buildDirectory.set(rootProject.layout.buildDirectory.dir("commlink-fixture"))
+}
+
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas".toString())
 }
@@ -19,8 +23,8 @@ android {
         applicationId "me.capcom.smsgateway.iphone"
         minSdk 21
         targetSdk 33
-        versionCode 23
-        versionName "0.8.9"
+        versionCode 24
+        versionName "0.9.0-dev"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -38,6 +42,10 @@ android {
     }
     buildTypes {
         debug {
+            // An opt-in fixture build can coexist with the installed 0.8.9 SMS handler.
+            if (project.hasProperty("commLinkFixture")) {
+                applicationIdSuffix ".commlinkfixture"
+            }
             debuggable true
             manifestPlaceholders = [networkSecurityConfig: "@xml/network_security_config"]
         }

@@ -6,7 +6,7 @@ import {api,ApiError,stateLabel,type Sms} from './api';
 import './style.css';
 import {NameEditor} from './NameEditor';
 type Phone={id:string,name:string};
-type SimLine={id:number,name:string,online?:boolean,phoneId:string,phoneName:string,slot:number,simName:string};
+import {canSendOn,lineKey,preferredSmsLine,type SimLine} from './lines';
 import {Icon,Avatar} from './Icons';
 import {listTime,groupEnd,showDate,sectionTime} from './presentation';
 import {reconcile} from './reconcile';
@@ -87,7 +87,7 @@ function App(){
   if(loading.current)return; loading.current=true;
   const epoch=generation.current;
   const simTask=api<SimLine[]>('sims').then(lines=>{
-   setSims(lines);setSim(prev=>prev || String(lines.find(s=>s.online!==false)?.id||''));
+   setSims(lines);setSim(prev=>prev || preferredSmsLine(lines,localStorage.getItem('sms.last-line')));
   });
   const phonesTask=api<Phone[]>('phones').then(setPhones);
   const metadataTask=api<ConversationState[]>('conversations').then(result=>{if(epoch===generation.current&&!mutation.current&&!metadataWrites.current){if(!Array.isArray(result))throw Error('会话状态暂不可用，请更新安卓应用后重试');setConversationStates(prev=>reuseRecords(prev,result));setMetadataReady(true)}});
@@ -97,8 +97,9 @@ function App(){
    setRows(prev=>{
     if(older)return reuseRecords(prev,[...new Map([...prev,...data.items].map(m=>[m.id,m])).values()]);
     const retained=prev.filter(m=>{
-     const prefix=m.id.slice(0,4),ids=data.items.filter(r=>r.id.startsWith(prefix)).map(r=>Number(r.id.slice(4)));
-     return data.next && ids.length && Number(m.id.slice(4))<Math.min(...ids);
+     const source=m.id.slice(0,m.id.lastIndexOf(':')+1);
+     const ids=data.items.filter(r=>r.id.slice(0,r.id.lastIndexOf(':')+1)===source).map(r=>Number(r.id.slice(source.length)));
+     return data.next && !data.items.some(r=>r.id===m.id) && (!ids.length || Number(m.id.slice(source.length))<Math.min(...ids));
     });
     return reuseRecords(prev,[...data.items,...retained]);
    });
@@ -127,7 +128,7 @@ function App(){
  const {groups:conversations,list}=useMemo(()=>groupConversations(all,keyOf),[all,keyOf]);
  const current=active?(conversations.get(active)||EMPTY):EMPTY;
  const title=current.find(m=>m.name)?.name||formatPhone(active||'',region);
- async function openConversation(address:string){const latest=[...(conversations.get(address)||[])].reverse().find(m=>m.incoming);if(latest)setSim(String(latest.sim||''));setActive(address);setScreen('chat');setError('');const time=Date.now();setRows(prev=>prev.map(m=>keyOf(m.address)===address?{...m,read:true}:m));try{await api('read',{address:rows.find(m=>keyOf(m.address)===address)?.address||address,time:String(time)});if(meta.get(address)?.unread)await changeConversation(address,'read')}catch(e){fail(e)}}
+ async function openConversation(address:string){const latest=[...(conversations.get(address)||[])].reverse().find(m=>m.incoming);if(latest){const last=sims.find(s=>s.id===latest.sim);setSim(last?lineKey(last):'unavailable')};setActive(address);setScreen('chat');setError('');const time=Date.now();setRows(prev=>prev.map(m=>keyOf(m.address)===address?{...m,read:true}:m));try{await api('read',{address:rows.find(m=>keyOf(m.address)===address)?.address||address,time:String(time)});if(meta.get(address)?.unread)await changeConversation(address,'read')}catch(e){fail(e)}}
  // Fragments never travel to the server. Clear the sender from browser history after reading it.
  const [notificationAddress,setNotificationAddress]=useState<string|null>(null);
  useEffect(()=>{
@@ -154,6 +155,7 @@ function App(){
  function messageSource(m:Sms){
   const line=sims.find(s=>s.id===m.sim);
   if(line)return line.phoneName+' · '+line.simName;
+  if(m.sim!=null && m.sim>104)return '原设备 · 历史线路';
   const peer=m.id.startsWith('xia:')||(m.sim||0)>100;
   return (phones.find(p=>p.id===(peer?'peer':'server'))?.name||(peer?'共享手机':'服务器手机'))+' · '+(m.sim?'卡 '+(m.sim>100?m.sim-100:m.sim):'线路未知');
  }
@@ -161,11 +163,12 @@ function App(){
   if(sending.current)return;
   const address=active||identity(recipient,region);
   if(!existing&&(!draft.trim()||!address||!sim))return;
-  if(!sims.some(s=>s.id===Number(existing?.sim||sim)&&s.online!==false)){setError('所选手机或 SIM 卡离线，请选择可用线路');return}
-  const m:Sms=existing||{id:crypto.randomUUID(),address,body:draft,date:Date.now(),incoming:false,read:true,sim:Number(sim),state:'local'};
-  if(!existing){setOutgoing(p=>[...p,m]);setDraft('');setActive(address);setScreen('chat')}
+  const selected=sims.find(s=>existing?(existing.lineId?s.lineId===existing.lineId:s.id===existing.sim):String(s.lineId||s.id)===sim);
+  if(!selected||!canSendOn(selected)){setError('所选手机或 SIM 卡离线，请选择可用线路');return}
+  const m:Sms=existing||{id:crypto.randomUUID(),address,body:draft,date:Date.now(),incoming:false,read:true,sim:selected.id,lineId:selected.lineId,state:'local'};
+  if(!existing){localStorage.setItem('sms.last-line',lineKey(selected));setOutgoing(p=>[...p,m]);setDraft('');setActive(address);setScreen('chat')}
   sending.current=true;setBusy(true);setError('');
-  try{const result=await api<{state:Sms['state'],error?:string}>('send',{id:m.id,address:m.address,body:m.body,sim:String(m.sim)});setOutgoing(p=>mergeOutgoing(p,[{...m,...result}]))}
+  try{const result=await api<{state:Sms['state'],error?:string}>('send',{id:m.id,address:m.address,body:m.body,...(selected.lineId?{lineId:selected.lineId}:{sim:String(m.sim)})});setOutgoing(p=>mergeOutgoing(p,[{...m,...result}]))}
   catch(e){setOutgoing(p=>mergeOutgoing(p,[{...m,state:'unknown'}]));fail(e)}finally{sending.current=false;setBusy(false);void refresh()}
  }
  const [filter,setFilter]=useState<'all'|'unread'|'deleted'>('all'),[menu,setMenu]=useState(false),[editing,setEditing]=useState(false);
@@ -217,7 +220,8 @@ function App(){
  const lastOutgoing=current.map(m=>m.incoming).lastIndexOf(false);
  const navigation=useNavigation(screen,listPage,detailPage,()=>{setSheet(false);setMessageMenu(null);setMenu(false);setEditMenu(false);setActive(null);setScreen('messages');setError('')});
  const back=navigation.back;
- const newMessage=()=>{setActive(null);setRecipient('');setDraft('');setScreen('new');setError('');setMenu(false);setEditMenu(false);setPinEditing(false)};
+ const selectedLine=sims.find(line=>lineKey(line)===sim);
+ const newMessage=()=>{setSim(preferredSmsLine(sims,localStorage.getItem('sms.last-line')));setActive(null);setRecipient('');setDraft('');setScreen('new');setError('');setMenu(false);setEditMenu(false);setPinEditing(false)};
  async function markSelected(){
   if(busy||mutation.current)return;mutation.current=true;setBusy(true);
   try{for(const key of selected){const c=list.find(c=>c.key===key);if(!c)continue;const last=c.items.at(-1)!;
@@ -281,12 +285,12 @@ function App(){
    <div ref={end}/>
   </section>
   <form className="composer" ref={composer} onSubmit={e=>{e.preventDefault();nearBottom.current=true;void send()}}>
-   <label className="sim-control">发送线路 <select aria-label="发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!sims.length&&<option value="">无可用 SIM</option>}{sims.map(s=><option value={s.id} key={s.id} disabled={s.online===false}>{s.name}</option>)}</select></label>
-   {draft.length>2000&&<p className="draft-limit">超过 2000 字，请删减后发送（当前 {draft.length} 字）</p>}<div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder={'短信 · '+(sims.find(s=>String(s.id)===sim)?.name||'SMS')} onPointerDown={e=>{if(e.pointerType==='touch'&&document.activeElement!==e.currentTarget)e.currentTarget.focus({preventScroll:true})}} value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||draft.length>2000||!sims.some(s=>s.id===Number(sim)&&s.online!==false)||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
+   <label className="sim-control">发送线路 <select aria-label="发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!selectedLine&&<option value={sim} disabled>{sims.length?'请选择发送线路':'无可用 SIM'}</option>}{sims.map(s=><option value={s.lineId||s.id} key={s.id} disabled={!canSendOn(s)}>{s.name}</option>)}</select></label>
+   {draft.length>2000&&<p className="draft-limit">超过 2000 字，请删减后发送（当前 {draft.length} 字）</p>}<div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder={'短信 · '+(selectedLine?.name||'SMS')} onPointerDown={e=>{if(e.pointerType==='touch'&&document.activeElement!==e.currentTarget)e.currentTarget.focus({preventScroll:true})}} value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||draft.length>2000||(!selectedLine||!canSendOn(selectedLine))||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
   </form>
  </div>}
  {screen==='settings'&&<header className="settings-header"><button className="glass circle" aria-label="返回信息列表" onClick={back}><Icon name="back"/></button><strong>设置</strong><span className="header-spacer"/></header>}
- {screen==='settings'&&<section className="settings"><h1>短信互联助手</h1><div className="card"><h3>号码显示</h3><label>本地号码地区<select value={region} onChange={e=>{setRegion(e.target.value as CountryCode);localStorage.setItem('sms.region',e.target.value)}}>{getCountries().map(r=><option value={r} key={r}>{new Intl.DisplayNames(['zh-CN'],{type:'region'}).of(r)} ({r})</option>)}</select></label><p>国际号码按国家码分段；没有国家码时使用此地区。号码库随应用离线提供。</p></div><div className="card"><h3>手机与 SIM 名称</h3><p>名称最多 30 个字符，清空后保存可恢复默认名称。改名不改变实际发送手机或 SIM 卡。</p>{phones.map(p=><div className="phone-names" key={p.id}><NameEditor label={(p.id==='server'?'服务器手机':'共享手机')+'名称'} value={p.name} onSave={name=>saveName('phones',p.id,name)}/>{sims.filter(s=>s.phoneId===p.id).map(s=><NameEditor key={s.id} label={p.name+' · SIM '+s.slot} value={s.simName} onSave={name=>saveName('sims',String(s.id),name)}/>)}</div>)}</div><div className="card"><h3>连接状态</h3><button onClick={()=>api('status').then(r=>setDiagnostic(JSON.stringify(r,null,2))).catch(fail)}>检查网关</button><pre>{diagnostic}</pre><p>无法连接时请检查证书、DDNS、路由器防火墙，以及 iPhone 当前网络是否支持 IPv6。浏览器无法单独确认是哪一项故障。</p></div><div className="card"><h3>通知</h3><label><input type="checkbox" checked={preview===true} disabled={pushBusy||preview===null} onChange={e=>void (e.target.checked?subscribe(true):disablePreview())}/> 显示短信预览（本设备）</label><p>开启后，通知会显示联系人或号码及短信摘要。点按可打开会话。锁屏显示内容由 iPhone 的“显示预览”设置控制。</p><p role="status">{pushStatus}</p><button disabled={pushBusy||preview===null} onClick={()=>void subscribe()}>开启 / 重新订阅通知</button><button onClick={()=>api<{status:string}>('push/test',{}).then(r=>setPushStatus(r.status)).catch(fail)}>发送测试通知</button><button onClick={()=>api<{status:string}>('push/status').then(r=>setPushStatus(r.status)).catch(fail)}>查看提交结果</button><button onClick={()=>setPushStatus('用户已确认：此设备收到通知')}>我已收到通知</button><button disabled={pushBusy} onClick={async()=>{setPushBusy(true);try{await api('push/unsubscribe',{});setPreview(false);const r=await navigator.serviceWorker.ready;await(await r.pushManager.getSubscription())?.unsubscribe();setPushStatus('已关闭通知')}catch(e){fail(e)}finally{setPushBusy(false)}}}>关闭通知</button></div><div className="card"><h3>隐私</h3><p>不持久保存短信正文或认证密钥。仅缓存界面资源；访问凭证 12 小时轮换，30 天未使用需重新配对。HTTPS 保护访问链路，普通短信不具备端到端加密。</p><button onClick={async()=>{await Promise.all((await caches.keys()).map(k=>caches.delete(k)));localStorage.removeItem('sms.region');setRows([]);setOutgoing([]);setError('本地缓存已清除')}}>清除本地缓存</button><button onClick={()=>api('logout',{}).then(()=>{setPaired(false);setRows([]);setOutgoing([])}).catch(fail)}>退出此设备</button></div></section>}
+ {screen==='settings'&&<section className="settings"><h1>互联信息</h1><div className="card"><h3>号码显示</h3><label>本地号码地区<select value={region} onChange={e=>{setRegion(e.target.value as CountryCode);localStorage.setItem('sms.region',e.target.value)}}>{getCountries().map(r=><option value={r} key={r}>{new Intl.DisplayNames(['zh-CN'],{type:'region'}).of(r)} ({r})</option>)}</select></label><p>国际号码按国家码分段；没有国家码时使用此地区。号码库随应用离线提供。</p></div><div className="card"><h3>手机与 SIM 名称</h3><p>名称最多 30 个字符，清空后保存可恢复默认名称。改名不改变实际发送手机或 SIM 卡。</p>{phones.map(p=><div className="phone-names" key={p.id}><NameEditor label={(p.id==='server'?'服务器手机':'共享手机')+'名称'} value={p.name} onSave={name=>saveName('phones',p.id,name)}/>{sims.filter(s=>s.phoneId===p.id).map(s=><NameEditor key={s.id} label={p.name+' · SIM '+s.slot} value={s.simName} onSave={name=>saveName('sims',String(s.id),name)}/>)}</div>)}</div><div className="card"><h3>连接状态</h3><button onClick={()=>api('status').then(r=>setDiagnostic(JSON.stringify(r,null,2))).catch(fail)}>检查网关</button><pre>{diagnostic}</pre><p>无法连接时请检查证书、DDNS、路由器防火墙，以及 iPhone 当前网络是否支持 IPv6。浏览器无法单独确认是哪一项故障。</p></div><div className="card"><h3>通知</h3><label><input type="checkbox" checked={preview===true} disabled={pushBusy||preview===null} onChange={e=>void (e.target.checked?subscribe(true):disablePreview())}/> 显示短信预览（本设备）</label><p>开启后，通知会显示联系人或号码及短信摘要。点按可打开会话。锁屏显示内容由 iPhone 的“显示预览”设置控制。</p><p role="status">{pushStatus}</p><button disabled={pushBusy||preview===null} onClick={()=>void subscribe()}>开启 / 重新订阅通知</button><button onClick={()=>api<{status:string}>('push/test',{}).then(r=>setPushStatus(r.status)).catch(fail)}>发送测试通知</button><button onClick={()=>api<{status:string}>('push/status').then(r=>setPushStatus(r.status)).catch(fail)}>查看提交结果</button><button onClick={()=>setPushStatus('用户已确认：此设备收到通知')}>我已收到通知</button><button disabled={pushBusy} onClick={async()=>{setPushBusy(true);try{await api('push/unsubscribe',{});setPreview(false);const r=await navigator.serviceWorker.ready;await(await r.pushManager.getSubscription())?.unsubscribe();setPushStatus('已关闭通知')}catch(e){fail(e)}finally{setPushBusy(false)}}}>关闭通知</button></div><div className="card"><h3>隐私</h3><p>不持久保存短信正文或认证密钥。仅缓存界面资源；访问凭证 12 小时轮换，30 天未使用需重新配对。HTTPS 保护访问链路，普通短信不具备端到端加密。</p><button onClick={async()=>{await Promise.all((await caches.keys()).filter(k=>k.startsWith("sms-shell-")).map(k=>caches.delete(k)));localStorage.removeItem('sms.region');setRows([]);setOutgoing([]);setError('本地缓存已清除')}}>清除本地缓存</button><button onClick={()=>api('logout',{}).then(()=>{setPaired(false);setRows([]);setOutgoing([])}).catch(fail)}>退出此设备</button></div></section>}
 
  {notice&&<div className="toast glass" role="status">{notice}</div>}
  <dialog ref={messageDialog} className="native-context message-context" data-outgoing={(messageMenu||lastMessage.current)?.incoming===false} aria-label="信息操作" {...messageMotion}>
@@ -316,7 +320,7 @@ function App(){
  </dialog>
  <dialog ref={dialog} className="options-sheet" {...optionsMotion}>
   <div className="sheet-content"><button className="sheet-close circle" aria-label="关闭短信选项" onClick={()=>setSheet(false)}><Icon name="close" size={20}/></button><Avatar name={current.find(m=>m.name)?.name} large/><h2>{screen==='chat'?title:'短信选项'}</h2>
-  {screen==='chat'&&<p>{formatPhone(active||'',region)}</p>}<label className="sheet-line">发送线路<select aria-label="选项中的发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!sims.length&&<option value="">无可用 SIM</option>}{sims.map(s=><option value={s.id} key={s.id} disabled={s.online===false}>{s.name}</option>)}</select></label>{screen==='chat'&&<><div className="sheet-line alert-toggle"><span>隐藏提醒</span><button type="button" className="ios-switch" role="switch" aria-label="隐藏提醒" aria-checked={!!meta.get(active!)?.muted} disabled={busy} onClick={()=>void act([active!],meta.get(active!)?.muted?'unmute':'mute')}><span/></button></div><p className="mute-note">只停止此对话在助手中的 iPhone 推送，短信仍会正常接收。安卓本机通知不受影响。</p>{error&&<p className="dialog-error">{error}</p>}</>}<p className="sheet-note">通过 Android 手机发送文字短信。附件、iMessage 与语音暂不支持。</p><button className="primary" onClick={()=>setSheet(false)}>完成</button></div>
+  {screen==='chat'&&<p>{formatPhone(active||'',region)}</p>}<label className="sheet-line">发送线路<select aria-label="选项中的发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!selectedLine&&<option value={sim} disabled>{sims.length?'请选择发送线路':'无可用 SIM'}</option>}{sims.map(s=><option value={s.lineId||s.id} key={s.id} disabled={!canSendOn(s)}>{s.name}</option>)}</select></label>{screen==='chat'&&<><div className="sheet-line alert-toggle"><span>隐藏提醒</span><button type="button" className="ios-switch" role="switch" aria-label="隐藏提醒" aria-checked={!!meta.get(active!)?.muted} disabled={busy} onClick={()=>void act([active!],meta.get(active!)?.muted?'unmute':'mute')}><span/></button></div><p className="mute-note">只停止此对话在助手中的 iPhone 推送，短信仍会正常接收。安卓本机通知不受影响。</p>{error&&<p className="dialog-error">{error}</p>}</>}<p className="sheet-note">通过 Android 手机发送文字短信。附件、iMessage 与语音暂不支持。</p><button className="primary" onClick={()=>setSheet(false)}>完成</button></div>
  </dialog>
  </>}{error&&<div role="alert" className="error"><span>{error}</span><button aria-label="关闭提示" onClick={()=>setError('')}><Icon name="close" size={18}/></button></div>}
  </main>

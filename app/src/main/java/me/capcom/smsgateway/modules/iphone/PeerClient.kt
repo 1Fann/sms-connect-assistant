@@ -1,6 +1,11 @@
 package me.capcom.smsgateway.modules.iphone
 
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import android.os.Build
+import me.capcom.smsgateway.modules.directory.PeerDirectoryAgent
 import com.google.gson.Gson
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -21,57 +26,103 @@ class PeerClient(private val ctx: Context) {
     val vault=SecretVault(ctx)
     private val client=OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).callTimeout(15,TimeUnit.SECONDS).build()
+    private class Denied : IOException("接入未获授权")
     private fun request(host:String,path:String,token:String,obj:JSONObject):JSONObject {
         require(host.matches(Regex("[A-Za-z0-9.-]+")))
         val origin="https://"+host+":8443"
         val req=Request.Builder().url(origin+"/peer/"+path).header("Origin",origin)
             .header("Authorization","Bearer "+token)
             .post(obj.toString().toRequestBody("application/json".toMediaType())).build()
-        return client.newCall(req).execute().use { if(!it.isSuccessful)throw IOException("HTTP "+it.code);JSONObject(it.body!!.string()) }
+        return client.newCall(req).execute().use { if(it.code==403)throw Denied();if(!it.isSuccessful)throw IOException("HTTP "+it.code);JSONObject(it.body!!.string()) }
     }
     fun join(host:String,code:String) {
         check(!ctx.getSharedPreferences("iphone",0).getBoolean("enabled",false))
         val saved=if(prefs.getString("token-host",null)==host)vault.get("peer-token")?.toString(Charsets.UTF_8) else null
-        val secret=saved?:PrivateStore.token().also{
-            vault.put("peer-token",it.toByteArray())
-            check(prefs.edit().putString("token-host",host).commit())
+        val info=JSONObject().put("code",code).put("protocol",3).put("model",Build.MODEL)
+        if(saved!=null) {
+            val existing=try { request(host,"link",saved,info) } catch (_:Denied) { null }
+            if(existing!=null) {
+                awaitApproval(host,saved,info,existing)
+                check(prefs.edit().putString("host",host).putBoolean("enabled",true).commit())
+                return
+            }
+            info.put("previous",saved)
         }
-        request(host,"link",secret,JSONObject().put("code",code))
-        prefs.edit().putString("host",host).putLong("cursor",0).putBoolean("enabled",true).commit()
+        val pending=if(prefs.getString("pending-host",null)==host)vault.get("peer-pending")?.toString(Charsets.UTF_8) else null
+        val secret=pending?.takeIf{it!=saved} ?: PrivateStore.token().also{
+            vault.put("peer-pending",it.toByteArray())
+            check(prefs.edit().putString("pending-host",host).commit())
+        }
+        awaitApproval(host,secret,info,request(host,"link",secret,info))
+        vault.put("peer-token",secret.toByteArray())
+        val edit=prefs.edit().putString("host",host).putString("token-host",host)
+            .remove("pending-host").putLong("cursor",0).putBoolean("enabled",true)
+        if (saved==null || host!=prefs.getString("host",null)) edit.putString("queue-scope",java.util.UUID.randomUUID().toString())
+        check(edit.commit())
+    }
+    private fun awaitApproval(host:String,secret:String,info:JSONObject,first:JSONObject) {
+        val deadline=android.os.SystemClock.elapsedRealtime()+180000
+        var response=first
+        while(response.optString("status")=="pending") {
+            check(android.os.SystemClock.elapsedRealtime()<deadline) { "主节点确认已超时" }
+            Thread.sleep(12_000)
+            response=request(host,"link",secret,info)
+        }
+        require(response.optString("status")=="ok" || response.optBoolean("ok"))
     }
     suspend fun run(history:SmsHistory, store:PrivateStore, state:(String)->Map<String,String>,present:(String)->Boolean,send:(String,String,String,Int,Long?)->Unit){
         var inspect=emptyList<String>();var failures=0
+        val queueScope=prefs.getString("queue-scope","").orEmpty()
+        // Migrated clients keep peer:<uuid> and their original receipt table.
+        // A different master cannot inspect old jobs or acknowledge old receipts.
+        val prefix=if(queueScope.isEmpty())"peer:" else "peer:"+queueScope+":"
+        val journal=PeerHub.get(ctx)
         while(currentCoroutineContext().isActive && prefs.getBoolean("enabled",false)){
             lastProgress=android.os.SystemClock.elapsedRealtime()
             var catchingUp=false
             try{
                 val secret=checkNotNull(vault.get("peer-token")).toString(Charsets.UTF_8)
                 val cursor=prefs.getLong("cursor",0)
-                val batch=history.page(cursor,20,true)
+                val shareSms=prefs.getBoolean("share-sms",true)
+                val canRead=shareSms && ContextCompat.checkSelfPermission(ctx,Manifest.permission.READ_SMS)==PackageManager.PERMISSION_GRANTED
+                val canSend=shareSms && ContextCompat.checkSelfPermission(ctx,Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED
+                val batch=if(canRead)history.page(cursor,20,true) else emptyList()
                 val sims=JSONObject()
                 for(s in SubscriptionsHelper.getActiveSimCards(ctx)){
                     SubscriptionsHelper.getSubscriptionId(ctx,s.simNumber-1)?.let{sims.put(s.simNumber.toString(),it)}
                 }
                 val states=JSONObject()
-                for(id in inspect)states.put(id,state("peer:"+id)["state"])
-                val receipts=store.receipts()
-                val payload=JSONObject().put("protocol",2).put("receipts",JSONArray(receipts)).put("slots",sims).put("rows",JSONArray(Gson().toJson(batch))).put("states",states)
+                for(id in inspect)states.put(id,state(prefix+id)["state"])
+                val receipts=if(queueScope.isEmpty())store.receipts() else journal.clientReceipts(queueScope)
+                val payload=JSONObject().put("protocol",3).put("model",Build.MODEL).put("os",Build.VERSION.RELEASE).put("smsAvailable",canSend).put("smsRead",canRead).put("receipts",JSONArray(receipts)).put("slots",sims).put("rows",JSONArray(Gson().toJson(batch))).put("states",states)
+                runCatching { me.capcom.smsgateway.modules.voice.VoiceGatewayProbe.detect(ctx) }.onSuccess { voice ->
+                    if(voice["installed"]==true)payload.put("voiceAgentVersion",voice["version"])
+                }
+                val directory=PeerDirectoryAgent(ctx,PrivateStore.hash(secret))
+                runCatching { payload.put("directory",directory.prepare()) }
                 val res=request(prefs.getString("host","")!!,"sync",secret,payload)
+                res.optJSONObject("directory")?.let { reply->runCatching { directory.accept(reply) } }
                 if(batch.isNotEmpty())prefs.edit().putLong("cursor",batch.last().id.substringAfter(':').toLong()).commit()
                 catchingUp=batch.size==20
                 val ids=res.getJSONArray("inspect");inspect=(0 until ids.length()).map{ids.getString(it)}
-                res.optJSONArray("acked")?.let { acked->store.acknowledgeReceipts((0 until acked.length()).map{acked.getString(it)}.filter{it in receipts}) }
+                res.optJSONArray("acked")?.let { acked->
+                    val confirmed=(0 until acked.length()).map{acked.getString(it)}.filter{it in receipts}
+                    if(queueScope.isEmpty())store.acknowledgeReceipts(confirmed) else journal.confirmClientReceipts(queueScope,confirmed)
+                }
                 res.optJSONObject("job")?.let { job->
-                    val id=job.getString("id");val slot=job.getInt("sim")-100
+                    val id=job.getString("id");val slot=job.optInt("slot",job.getInt("sim")-100)
                     val address=job.getString("address");val body=job.getString("body")
-                    require(id.matches(Regex("[a-fA-F0-9-]{36}")) && slot in 1..4 && address.matches(Regex("\\+?[0-9]{3,20}")) && body.length in 1..2000)
+                    require(id.matches(Regex("[a-fA-F0-9-]{36}")) && slot>0 && address.matches(Regex("\\+?[0-9]{3,20}")) && body.length in 1..2000)
                     currentCoroutineContext().ensureActive()
                     if(!prefs.getBoolean("enabled",false))return
-                    val localId="peer:"+id;val fingerprint=PrivateStore.hash(address+"|"+slot+"|"+body)
+                    val localId=prefix+id;val fingerprint=PrivateStore.hash(address+"|"+slot+"|"+body)
                     val expires=if(job.has("expires"))job.getLong("expires") else null
-                    if(SubscriptionsHelper.getSubscriptionId(ctx,slot-1)!=job.getInt("sub") && !present(localId))store.rejectPeer(localId,fingerprint)
-                    else store.enqueueOnce(localId,fingerprint,{present(localId)}) { send(localId,address,body,slot,expires) }
-                    store.receipt(id)
+                    if((!canSend || SubscriptionsHelper.getSubscriptionId(ctx,slot-1)!=job.getInt("sub")) && !present(localId))store.rejectPeer(localId,fingerprint)
+                    else store.enqueueOnce(localId,fingerprint,{present(localId)}) {
+                        PeerHub.get(ctx).bindSubmission(localId,slot,job.getInt("sub"))
+                        send(localId,address,body,slot,expires)
+                    }
+                    if(queueScope.isEmpty())store.receipt(id) else journal.clientReceipt(queueScope,id)
                 }
                 failures=0;status="已连接服务器手机 · 本机共享 "+sims.length()+" 条线路"
             }catch(e:Exception){if(e is kotlinx.coroutines.CancellationException)throw e;failures=(failures+1).coerceAtMost(4);status="等待连接 · "+e.javaClass.simpleName}

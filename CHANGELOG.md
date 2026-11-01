@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev · CommLink
+
+- 保留 0.8.9 短信入口和签名身份，加入多设备注册、逻辑线路、独立电话 PWA、分安装授权、双向联系人写回及通话记录。
+- 语音适配器使用受限的网页 SIP 端点和本机 ARI。真实选卡、锁屏、媒体和接续的发布门槛见 [升级说明](docs/COMMLINK-UPGRADE.md)。
+- Adds device-scoped pairing and lines, the Phone PWA, contact write-back, call records and an opt-in Asterisk/WebRTC/Groundwire integration. Physical voice acceptance is pending.
+
+
 ## 0.6.0-candidate
 
 - 补齐左滑“隐藏提醒 + 删除”，静音标记、长按菜单和联系人详情开关共享持久状态。

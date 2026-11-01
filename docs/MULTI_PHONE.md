@@ -1,45 +1,32 @@
-# 双手机短信共享 / Two-phone SMS sharing
+# 多设备通讯－配对与共享 / Multi-device pairing and sharing
 
 ## 中文
 
-手机按角色区分，不按品牌区分。任意两部满足应用要求的安卓手机均可组成一对，当前支持一部服务器手机接入一部共享手机。两部手机安装同一 APK；普通共享不要求 Root。具体系统的短信权限、后台运行限制和网络可达性仍需验证。
+一部 Android 主节点运行 HTTPS 服务。其他 Android 手机主动连接主节点，共享已授权的数据与本机 SIM；它们不需要部署第二套 HTTPS 服务或 PBX。普通短信共享不依赖 Root。语音需要独立验证本机 Voice SIP Agent、蜂窝桥接及主节点 PBX。
 
-1. 选择一部作为**服务器手机**，按安装说明配置域名、可信 HTTPS 证书并开启服务。iPhone 与这部手机配对。
-2. 在服务器手机的「多手机短信 · 配对与共享」页面生成接入码。
-3. 在另一部**共享手机**打开同一页面，输入服务器手机的域名及接入码。授予短信与 SIM 权限后连接。共享手机无需另配证书或开放入站端口，但必须能访问服务器。
-4. 在两部手机上允许后台运行，并按各自系统设置自启动和电池策略。
-5. 刷新 iPhone 页面。短信来源和发送线路显示为「服务器手机 · 卡 1/2」或「共享手机 · 卡 1/2」。发送前检查所选手机与 SIM；共享手机离线时，对应线路不可用，不会自动改用另一部手机发送。
+1. 在主节点开启原 HTTPS 服务，保留已有证书和 iPhone 配对，在「多设备通讯－配对与共享」生成一次性接入码。每次生成会替换之前尚未完成的邀请。
+2. 在新节点输入主节点域名和接入码，按需启用短信和发送权限。联系人、写回、通话记录在单独的授权页设置。回到主节点审批请求。自报设备型号仅用于辅助辨认。
+3. 对每台设备分别审批。列表使用独立设备身份，设备在线时可看到可用线路。共享节点无需对外开放入站端口。实际后台可靠性取决于系统策略和连接情况。
+4. 在主节点线路管理中可以将线路设为默认、移至首位、停用、启用，并在设备／线路名称设置里修改备注。iPhone 显示逻辑线路；请在发送前核对设备和 SIM。失效的已选线路不会自动换成另一张。
+5. 检测到换卡、槽位移动或已消失的订阅重新出现时，原绑定可能暂停。核对实际 SIM 后再确认。若同一张实体 SIM 移到另一台设备，原设备必须先报告旧卡已移出；核对新位置，在新线路上选择关联旧线路。Android 的槽位和订阅 ID 本身不能证明跨设备卡片身份。
+6. 「停止共享」会停止子节点连接。主节点可单独撤销某个设备，其凭据立即失效。共享短信历史与幂等记录保留在主节点。重新接入需要新邀请和审批；升级客户端可凭旧身份材料和新凭据恢复原设备身份。卸载或清除应用数据丢失身份材料后，应作为新设备审批。
 
-两部手机可以来自相同或不同品牌。角色由配置决定；已经开启服务器模式的手机不能同时作为共享客户端。已有配对、短信标识和缓存可在 0.8.1 覆盖升级时继续使用。系统可能在覆盖安装后撤回权限，请核对短信、SIM 和后台权限。
+### 兼容与持久化
 
-「停止共享」停止共享手机的连接；服务器手机上的「解除接入并删除共享手机缓存」撤销授权并移除服务器缓存，不删除两部手机的原始短信。当前的双手机验证未发送真实测试短信，也不代表所有品牌和长期息屏情况均已验收。
-
-### 自定义名称（0.8.2）
-
-在 iPhone 的「设置 → 手机与 SIM 名称」中，分别填写两部手机及各张 SIM 卡的名称并点「保存」，例如「家中手机 · 工作卡」。名称最多 30 个字符，清空后保存恢复默认名称。共享手机离线时也可修改已缓存线路的名称。
-
-名称保存在服务器手机上，其他已配对的 iPhone 刷新后也会显示；不会更改安卓系统中的设备名称或运营商名称。短信来源、详情及发送线路同步使用这些名称，实际收发绑定的设备和卡槽不变。解除共享手机配对时，会一并清除该共享手机及其 SIM 卡的别名。
+- 继续使用原 Android 应用 ID、签名和数据库文件。已有 v1/v2 共享节点的凭据摘要、历史、线路别名、发送阶段和待推送事件迁入 `paired-phone.db` v3。不要卸载或清库。
+- 原本机槽位 1–4 和旧共享设备 101–104 保留兼容别名，原 `xia:` 消息身份不变。新节点由主节点分配 UUID，其历史按 `(设备身份, 系统记录 ID)` 去重，分页使用独立的主节点顺序号。
+- v3 同步复用原 HTTPS 心跳，提供设备能力和实际选卡字段；旧客户端继续收到其旧格式。每个任务、状态查询、接收确认和推送事件绑定到已认证设备。给 A 的任务不能由 B 领取、确认或完成。
+- 每条业务线路有独立 UUID，数字别名供旧版界面及历史显示。本机和升级共享端的新任务在入队前保存所选订阅。执行时使用匹配的订阅创建 SmsManager。结果未知的请求必须先核实，不会因重连新建发送请求。
+- 旧版共享端不具备客户端新增的最终选卡校验。涉及热拔插或大量线路，先升级对应子节点。系统若以完全相同的槽位和订阅 ID 替换实体卡且未报告过中断，普通应用无法据此可靠识别卡片。
 
 ## English
 
-Phones are identified by role, not brand. Any two Android phones meeting the application's requirements can form a pair. Currently, one server phone supports one sharing phone. Both use the same APK; ordinary sharing does not require Root. SMS permissions, background restrictions and network reachability still need validation on each system.
+One Android phone hosts HTTPS. Additional Android peers connect outbound and share only the features enabled on them. A peer does not need its own HTTPS server or PBX. Cellular voice still needs its own validated gateway on that phone.
 
-1. Choose a **server phone**, configure its domain and trusted HTTPS certificate, and enable the server following the installation guide. Pair the iPhone with this phone.
-2. Generate an invitation code from the server phone's multi-phone sharing page.
-3. Open the same page on the **sharing phone**, enter the server's domain and invitation code, grant SMS and SIM permissions, and connect. The sharing phone needs outbound access to the server, but no separate certificate or inbound port.
-4. Allow background operation on both phones and configure their system-specific autostart and battery settings.
-5. Refresh the iPhone page. Message sources and sending lines use the server/sharing roles and physical SIM slots. Check the selected phone and SIM before sending. An offline sharing phone's lines are unavailable; sending never automatically falls back to the other phone.
+1. Keep the existing HTTPS setup on the host. Generate a one-time invitation in multi-device pairing. A new invitation replaces the previous pending one.
+2. Enter the host and invitation on the new phone. Enable SMS sharing if desired, and grant contacts, write-back or call-log access separately. Confirm the request on the host. Repeat for each device.
+3. Select a named device and line on iPhone. The host can choose a default, change order, disable a line or confirm a changed subscription. An unavailable saved selection cannot silently route to another SIM.
+4. Confirm the physical SIM after a change. To retain a logical line when moving a card between devices, the old phone must report its absence. Choose the old identity on the new line and confirm the binding on Android.
+5. Revoke peers individually. Revocation blocks their credentials while keeping SMS history and submission journals on the host. A new client can restore its device identity with the old identity material, a new credential, a fresh invitation and host approval.
 
-The phones may have the same or different brands. Configuration determines the role; an enabled server cannot simultaneously act as a sharing client. Updating to 0.8.1 preserves existing pairings, message identities and cached history. Some systems revoke permissions on replacement installs, so recheck SMS, SIM and background permissions afterward.
-
-Stopping sharing disconnects the sharing phone. Revoking the peer on the server also removes its cached shared history, while preserving both phones' original SMS records. Current two-phone verification did not send a real test SMS and does not establish compatibility with every brand or prolonged screen-off operation.
-
-### Custom names (0.8.2)
-
-In the iPhone settings, open the phone and SIM naming section, edit each name, and press Save. Names support up to 30 characters; saving an empty name restores the default. Cached sharing-phone lines can be renamed while offline. Aliases are stored on the server phone and appear on other paired iPhones after refresh. They do not rename the Android device or carrier. Message sources, details, and sending selectors use these aliases while the physical phone and SIM routing stays unchanged. Revoking the sharing phone also clears its phone and SIM aliases.
-
-## 0.8.3 可靠性交接 / Reliable handoff
-
-两部手机都升级后启用持久接收确认及发送提交防重复。旧客户端仍能连接，但不补发旧版本遗留的未知发送任务。新共享收件可触发服务器 Web Push；需先在 iPhone 授权订阅，首次导入旧短信不提醒。发送结果未知时先核实，勿直接新建相同短信。详见 [0.8.3 中英文说明](releases/v0.8.3.md)。
-
-Upgrade both phones for durable receive acknowledgements and submission deduplication. Legacy clients still connect, but ambiguous old jobs are not blindly replayed. New shared incoming SMS can trigger the server Web Push subscription; authorize it on the iPhone first. Initial historical imports do not generate alerts. Verify unknown send outcomes before creating another request. See the [0.8.3 notes](releases/v0.8.3.md).
+The non-destructive database upgrade from v2 preserves old numeric aliases, `xia:` IDs, in-flight delivery phases and notifications. New histories, receipts and jobs are scoped to their authenticated device. The v3 protocol adds explicit physical slots and capabilities while preserving v1/v2 message exchange. New clients bind sends to the selected subscription through modem submission; upgrade legacy peers before relying on protection against SIM changes. Radio delivery, swap detection and background behavior still require tests on each target phone.

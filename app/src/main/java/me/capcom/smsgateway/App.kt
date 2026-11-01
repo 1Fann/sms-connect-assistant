@@ -76,6 +76,9 @@ class App: Application() {
 
         instance = this
 
+        // Isolated instrumentation uses synthetic private databases only. Never
+        // register modem callbacks, start the gateway or schedule the Root guard.
+        if (BuildConfig.DEBUG && packageName.endsWith(".commlinkfixture")) return
         EventsReceiver.register(this)
         me.capcom.smsgateway.modules.iphone.BridgeMonitor.initialize(this)
         me.capcom.smsgateway.modules.defaultsms.InboxRecoveryWorker.enqueue(this)

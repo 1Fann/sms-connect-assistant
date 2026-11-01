@@ -8,7 +8,7 @@ import me.capcom.smsgateway.helpers.SubscriptionsHelper
 import com.google.i18n.phonenumbers.PhoneNumberUtil
 
 data class SmsRow(val id: String, val address: String, val display: String, val name: String?, val body: String,
-    val date: Long, val incoming: Boolean, val read: Boolean, val sim: Int?, val state: String, val creator: String? = null, val error: String? = null)
+    val date: Long, val incoming: Boolean, val read: Boolean, val sim: Int?, val state: String, val creator: String? = null, val error: String? = null, val sourceSubscription: Int? = null)
 
 class SmsHistory(private val context: Context, private val store: PrivateStore) {
     fun contacts(query: String): List<Map<String,String>> = try {
@@ -33,11 +33,14 @@ class SmsHistory(private val context: Context, private val store: PrivateStore) 
                 result.add(SmsRow("sms:${c.getLong(0)}", address, format(raw), name, c.getString(2) ?: "", date,
                     type == 1, c.getInt(5) == 1 || date <= store.seen(address),
                     if(c.isNull(6)) null else SubscriptionsHelper.getSimSlotIndex(context, c.getInt(6))?.plus(1),
-                    when { type == 1 -> "received"; type == 5 || (type == 2 && c.getInt(7) >= 64) -> "failed"; type == 2 && c.getInt(7) == 0 -> "delivered"; type == 2 -> "sent"; type == 4 || type == 6 -> "accepted"; else -> "unknown" },c.getString(8)))
+                    when { type == 1 -> "received"; type == 5 || (type == 2 && c.getInt(7) >= 64) -> "failed"; type == 2 && c.getInt(7) == 0 -> "delivered"; type == 2 -> "sent"; type == 4 || type == 6 -> "accepted"; else -> "unknown" },c.getString(8),sourceSubscription=if(c.isNull(6)) null else c.getInt(6)))
             }
         }
         return result
     }
+    fun addresses(): Set<String> = context.contentResolver.query(Telephony.Sms.CONTENT_URI,
+        arrayOf("address"),null,null,null)?.use { c -> buildSet { while(c.moveToNext()) c.getString(0)?.let { add(it) } } } ?: emptySet()
+
     fun contact(number: String): String? = try {
         context.contentResolver.query(Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number)),
             arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use { if(it.moveToFirst()) it.getString(0) else null }

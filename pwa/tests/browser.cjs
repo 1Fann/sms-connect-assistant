@@ -1,31 +1,31 @@
 // Test-only SMS adapter. This process cannot send actual SMS.
 const http = require('node:http'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const root=path.resolve(__dirname,'../../app/src/main/assets/iphone');
+const root=process.env.SMS_UI_TEST_ASSETS||path.resolve(__dirname,'../../app/src/main/assets/iphone');
 const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='/'?'index.html':req.url.split('?')[0]);if(!file.startsWith(root)){res.writeHead(403).end();return}try{res.setHeader('Content-Type',file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':file.endsWith('.png')?'image/png':'text/html');res.end(fs.readFileSync(file))}catch{res.writeHead(404).end()}});
 (async()=>{
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL || 'msedge'});
  try{
  const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true,serviceWorkers:'block'});
- let paired=false;let failSend=true;let historyFails=false;let failedMessage=null;const ids=[];const errors=[];
+ let paired=false;let failSend=true;let historyFails=false;let failedMessage=null;const ids=[];const errors=[];let requestedLine='fixture-stable-one';let peerAvailable=true;
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/**',async route=>{const p=new URL(route.request().url()).pathname;let data={};let status=200;
  if(p==='/api/pair'){data={status:'pending'}}else if(p==='/api/pair/finish'){paired=true;data={status:'ok'}}else if(!paired){status=401}
  else if(p==='/api/status'){data={publicConnectivity:'unverified'}}
  else if(p==='/api/phones'){data=[{id:'server',name:'服务器手机'}]}
- else if(p==='/api/sims'){data=[{id:1,name:'服务器手机 · 中国联通',phoneId:'server',phoneName:'服务器手机',slot:1,simName:'中国联通'},{id:2,name:'服务器手机 · 备用线路',phoneId:'server',phoneName:'服务器手机',slot:2,simName:'备用线路'}]}
+ else if(p==='/api/sims'){data=[{id:1,lineId:'fixture-stable-one',name:'服务器手机 · 中国联通',phoneId:'server',phoneName:'服务器手机',slot:1,simName:'中国联通'},{id:2,lineId:'fixture-stable-two',name:'服务器手机 · 备用线路',phoneId:'server',phoneName:'服务器手机',slot:2,simName:'备用线路'},{id:10009,lineId:'fixture-peer-same-slot',name:'共享设备 · 卡 1',phoneId:'fixture-peer',phoneName:'共享设备',slot:1,simName:'卡 1',online:peerAvailable}]}
  else if(p==='/api/history'){if(historyFails)status=500;data={items:[{id:'sms:1',address:'13800138000',body:'这是一条用于界面验证的测试短信。',date:Date.now(),incoming:true,read:false,sim:1,state:'received'}],next:null}}
  else if(p==='/api/conversations'){data=[]}
  else if(p==='/api/outgoing'){data=failedMessage?[failedMessage]:[]}
- else if(p==='/api/send'){const body=route.request().postDataJSON();ids.push(body.id);if(failSend){failSend=false;await route.abort('failed');return}data={state:'accepted'}}
+ else if(p==='/api/send'){const body=route.request().postDataJSON();assert.equal(body.lineId,requestedLine);assert.equal(body.sim,undefined);ids.push(body.id);if(failSend){failSend=false;await route.abort('failed');return}data={state:'accepted'}}
  else if(p.startsWith('/api/send/')){data={state:'unknown'}}
  await route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
  });
  const origin='http://127.0.0.1:'+server.address().port;
  await page.goto(origin);await page.getByLabel('安卓显示的配对码').fill('testcode1234');await page.getByRole('button',{name:'连接我的手机'}).click();
  await page.getByText('138 0013 8000',{exact:true}).waitFor();
- const out=path.resolve(__dirname,'../../verification');fs.mkdirSync(out,{recursive:true});await page.screenshot({path:path.join(out,'conversations-light.png')});
+ const out=process.env.SMS_UI_TEST_OUTPUT||path.resolve(__dirname,'../../verification');fs.mkdirSync(out,{recursive:true});await page.screenshot({path:path.join(out,'conversations-light.png')});
  await page.getByText('138 0013 8000',{exact:true}).click();await page.getByLabel('短信内容',{exact:true}).fill('仅模拟发送');await page.getByRole('button',{name:'发送短信',exact:true}).click();
  await page.getByRole('button',{name:'核对 / 重试同一请求'}).click();await page.getByText('网关已接受',{exact:true}).waitFor();assert.equal(ids.length,2);assert.equal(ids[0],ids[1]);
  await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:path.join(out,'chat-dark.png')});
@@ -35,6 +35,17 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await page.getByText('发送失败 · 安卓短信接口返回通用发送失败',{exact:true}).waitFor();
  assert.equal(ids.length,2); // Refresh must never resend a failed message.
  console.log('PASS: outgoing failure updates even when history fails; no automatic resend');
+ const selector=page.getByLabel('发送线路',{exact:true});const sendButton=page.getByRole('button',{name:'发送短信',exact:true});
+ await selector.selectOption('fixture-peer-same-slot');
+ await page.getByLabel('短信内容',{exact:true}).fill('仅模拟共享线路');
+ peerAvailable=false;await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>document.querySelector('select[aria-label=发送线路] option[value=fixture-peer-same-slot]')?.disabled);
+ assert.equal(await selector.inputValue(),'fixture-peer-same-slot');assert.equal(await sendButton.isDisabled(),true);assert.equal(ids.length,2);
+ peerAvailable=true;await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>!document.querySelector('select[aria-label=发送线路] option[value=fixture-peer-same-slot]')?.disabled);
+ requestedLine='fixture-peer-same-slot';await sendButton.click();await page.waitForFunction(()=>!document.querySelector('textarea[aria-label=短信内容]').value);
+ assert.equal(ids.length,3);assert.equal(await page.evaluate(()=>localStorage.getItem('sms.last-line')),requestedLine);
+ console.log('PASS: second device sharing the same SIM slot, no silent offline fallback, explicit stable line on send');
  console.log('PASS: pairing, two SIM choices, history, safe timeout retry, accepted-not-delivered state, mobile overflow, no JS errors');
  }finally{await browser.close();server.close()}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});

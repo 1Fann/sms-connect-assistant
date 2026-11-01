@@ -1,5 +1,5 @@
 export type State='local'|'accepted'|'sent'|'delivered'|'failed'|'unknown'|'received';
-export type Sms={id:string,address:string,display?:string,name?:string,body:string,date:number,incoming:boolean,read:boolean,sim?:number,state:State,creator?:string,error?:string};
+export type Sms={id:string,address:string,display?:string,name?:string,body:string,date:number,incoming:boolean,read:boolean,sim?:number,lineId?:string,state:State,creator?:string,error?:string};
 export class ApiError extends Error {constructor(public status:number,message:string){super(message)}}
 let rotating:Promise<boolean>|null=null;
 export async function api<T>(path:string,body?:unknown,retry=true):Promise<T>{

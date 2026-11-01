@@ -1,18 +1,16 @@
-# 短信互联助手 · SMS Connect Assistant
+# 通讯互联 · CommLink
 
 中文 | [English](README.en.md)
 
-让自己的 Android 手机作为短信终端，在 iPhone 的主屏幕网页应用中查看、接收和发送短信。单个 APK 内置 HTTPS 服务和网页，不需要电脑持续运行。
+CommLink 在一部 Android 上聚合多部已授权手机的 SIM、短信、通讯录和通话记录。iPhone 从主屏幕分别打开「互联信息」和「互联电话」。日常短信仍使用原安装入口及系统库。语音使用独立的 Voice SIP Agent、Asterisk 和 Groundwire；启用前须完成网关选卡、PBX 和媒体验证。
 
-**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.8.9**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
-
-0.8.9 为 iPhone 主屏幕应用加入未读角标。0.8.8 新增加密短信通知预览并改进长按操作。升级保留已有配对和短信记录。[双手机配置](docs/MULTI_PHONE.md) · [中英文更新说明](docs/releases/v0.8.9.md)。
+**开发版 0.9.0-dev（24）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。稳定发布与本开发分支的设备、权限及网页结构有差异。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
 ## 功能
 
-- 两部兼容的安卓手机可配对共享，不限品牌：一部作为服务器手机，另一部作为共享手机；iPhone 汇总查看短信，并选择对应手机的 SIM 卡发送。见[双手机配置](docs/MULTI_PHONE.md)。
+- 一台主节点可配对多部 Android，每部设备和每条逻辑线路有独立标识。参见[多设备配置](docs/MULTI_PHONE.md)。
 - iPhone PWA：短信列表、会话、联系人搜索、双 SIM 线路选择、发送状态和深浅色界面。
 - 参照原生“信息”录屏调整界面：居中标题、圆形滑动操作、居中置顶头像、底部悬浮搜索和分组气泡。长按展开会话预览与独立菜单，预览不会自动标为已读。网页版材质与系统原生仍有差异。
 - 会话手势：左滑删除、右滑已读/未读、长按菜单、最多 9 个置顶会话、批量删除和恢复；状态保存在安卓端。删除仅从助手移除，安卓原始短信保留，“最近删除”可随时恢复，新短信照常显示。

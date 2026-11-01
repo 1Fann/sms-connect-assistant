@@ -43,7 +43,7 @@
     <string name="listening_to_the_server_events">正在监听服务器事件…</string>
     <string name="local_address">本地地址</string>
     <string name="local_server_dotdotdot">本地服务器…</string>
-    <string name="local_sms_gateway_notifications">短信互联助手通知</string>
+    <string name="local_sms_gateway_notifications">通讯互联通知</string>
     <string name="local">本地</string>
     <string name="login_code_expires">登录验证码，有效期至 %1$s</string>
     <string name="login_code">登录验证码</string>
@@ -91,8 +91,8 @@
     <string name="sign_in">登录</string>
     <string name="sign_up">注册</string>
     <string name="signing_key">签名密钥</string>
-    <string name="sms_gateway_is_running_on_port">短信互联助手已在端口 %1$d 运行</string>
-    <string name="sms_gateway">短信互联助手</string>
+    <string name="sms_gateway_is_running_on_port">通讯互联已在端口 %1$d 运行</string>
+    <string name="sms_gateway">通讯互联</string>
     <string name="success_long_press_to_copy">成功，长按可复制</string>
     <string name="system">系统</string>
     <string name="tab_text_home">首页</string>

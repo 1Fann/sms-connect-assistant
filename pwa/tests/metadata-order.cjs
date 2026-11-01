@@ -50,7 +50,8 @@ const names={a:'合成自动已读 A',b:'合成置顶 B',c:'合成失败回退 C
    const p=new URL(route.request().url()).pathname,method=route.request().method();let data={};
    if(p==='/api/history')data={items:rows,next:null};
    else if(p==='/api/outgoing'||p==='/api/contacts')data=[];
-   else if(p==='/api/sims')data=[{id:1,name:'合成线路'}];
+   else if(p==='/api/phones')data=[{id:'server',name:'测试主机'}];
+   else if(p==='/api/sims')data=[{id:1,name:'合成线路',phoneId:'server',phoneName:'测试主机',slot:1,simName:'合成线路',online:true}];
    else if(p==='/api/conversations'&&method==='GET')data=snapshot();
    else if(p==='/api/conversations'&&method==='POST'){
     const {address,action}=route.request().postDataJSON();

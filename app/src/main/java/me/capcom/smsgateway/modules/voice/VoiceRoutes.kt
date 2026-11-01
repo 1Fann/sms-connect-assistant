@@ -76,4 +76,10 @@ fun Route.voiceRoutes(context:Context,owner:(ApplicationCall)->String,
             runtime.handoff(id,o,call.voiceBody().optString("requestId"))
         }
     }
+    post("calls/{id}/resume"){
+        if(requireScope(call,"calls.dial"))call.replyVoice{
+            val (id,o)=authorizedCall(call)
+            runtime.resumeWeb(id,o)
+        }
+    }
 }

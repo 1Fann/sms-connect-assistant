@@ -189,6 +189,21 @@ class VoiceRuntime internal constructor(context:Context,
             throw VoiceFault(409,"目前不能接续这通电话")
         beginNative(c,request);return c.visible()
     }
+    /** Reattach to the existing outside leg. This path must never originate another cellular call. */
+    @Synchronized fun resumeWeb(id:String,owner:String):Map<String,Any>{
+        val c=owned(id,owner)
+        if(!connected || c.optBoolean("finishing") || c.phase !in setOf(CallPhase.WEB_ACTIVE,CallPhase.HANDOFF_FAILED,CallPhase.RECOVERING))
+            throw VoiceFault(409,"目前不能恢复网页通话")
+        checkInstallation(c)
+        val outside=c.channel("outside") ?: throw VoiceFault(409,"外线已经结束")
+        if(ari.channel(outside)?.optString("state")!="Up")throw VoiceFault(409,"外线已经结束")
+        if(c.optLong("deadline") in 1..now())throw VoiceFault(409,"恢复等待已超时")
+        if(!c.has("resumeTicket") || now()>=c.optLong("resumeUntil")){
+            c.put("resumeTicket",uuid()).put("resumeUntil",minOf(now()+60_000,c.optLong("deadline",now()+60_000)))
+            journal.put(c)
+        }
+        return c.visible()+mapOf("target" to "sip:cl-"+c.getString("resumeTicket")+"@"+config.domain)
+    }
     private fun beginNative(c:JSONObject,request:String){
         checkInstallation(c)
         if(!connected||!ari.endpoint(config.nativeUser).let{it.online&&it.channels==0})throw VoiceFault(503,"Groundwire SIP 端点离线或忙碌")
@@ -232,6 +247,10 @@ class VoiceRuntime internal constructor(context:Context,
         val endpoint=VoicePolicy.endpoint(channel.optString("name"))
         if(args?.optString(0)=="web" && endpoint==config.webUser){
             val target=channel.optJSONObject("dialplan")?.optString("exten").orEmpty()
+            val resuming=active.singleOrNull{!it.optBoolean("finishing") &&
+                it.phase in setOf(CallPhase.WEB_ACTIVE,CallPhase.HANDOFF_FAILED,CallPhase.RECOVERING) &&
+                it.has("resumeTicket") && target.length==35 && "cl-"+it.getString("resumeTicket")==target && now()<it.optLong("resumeUntil")}
+            if(resuming!=null){webRejoined(resuming,ch);return}
             val c=active.singleOrNull{it.phase==CallPhase.WAITING_WEB && "cl-"+it.optString("ticket")==target && target.length==35 && now()-it.getLong("created") in 0..30_000}
             if(c!=null){webJoined(c,ch);return}
         }
@@ -256,6 +275,26 @@ class VoiceRuntime internal constructor(context:Context,
         }
         // Fail closed for untrusted tickets or calls from an unrecognised endpoint.
         ari.drop(ch)
+    }
+    private fun webRejoined(c:JSONObject,web:String){
+        val old=c.channel("web")
+        c.remove("resumeTicket");c.remove("resumeUntil");journal.put(c)
+        try{
+            checkInstallation(c)
+            val outside=c.channel("outside") ?: error("Missing outside leg")
+            check(ari.channel(outside)?.optString("state")=="Up")
+            ari.answer(web)
+            if(old!=null)runCatching{ari.mute(old,true)}
+            ari.add(c.getString("bridge"),web);ari.mute(web,false)
+            c.put("web",web);c.remove("deadline");c.remove("reason")
+            if(old!=null)c.put("retiredWeb",old)
+            phase(c,CallPhase.WEB_ACTIVE)
+            if(old!=null)runCatching{ari.drop(old);c.remove("retiredWeb");journal.put(c)}
+        }catch(_:Exception){
+            runCatching{ari.drop(web)}
+            if(old!=null)runCatching{ari.mute(old,false)}
+            c.put("reason","网页音频重连未成功，请重试");journal.put(c)
+        }
     }
     private fun webJoined(c:JSONObject,web:String){
         val line=VoiceLine(c.getString("lineId"),c.getString("device"),c.getInt("slot"),true,c.getInt("sub"))
@@ -310,8 +349,9 @@ class VoiceRuntime internal constructor(context:Context,
                 c.remove("web");journal.put(c)
                 if(c.phase.handingOff || c.phase==CallPhase.NATIVE_ACTIVE)return
                 if(c.phase!=CallPhase.WEB_ACTIVE && c.phase!=CallPhase.HANDOFF_FAILED){finish(c,"网页呼叫已取消");return}
-                c.put("deadline",now()+25_000);phase(c,CallPhase.RECOVERING)
-                if(c.optBoolean("auto"))runCatching{beginNative(c,UUID.randomUUID().toString())}
+                val retryNative=c.phase==CallPhase.WEB_ACTIVE && c.optBoolean("auto")
+                recoverWeb(c,"网页音频已断开，请恢复网页通话")
+                if(retryNative)runCatching{beginNative(c,UUID.randomUUID().toString())}
             }
         }
     }
@@ -329,7 +369,12 @@ class VoiceRuntime internal constructor(context:Context,
         if(web!=null){
             runCatching{ari.mute(web,false)}
             c.remove("deadline");phase(c,CallPhase.HANDOFF_FAILED)
-        }else finish(c,why)
+        }else if(c.getString("direction")=="outgoing")recoverWeb(c,why)
+        else finish(c,why)
+    }
+    private fun recoverWeb(c:JSONObject,why:String){
+        c.put("reason",why).put("deadline",now()+60_000)
+        phase(c,CallPhase.RECOVERING)
     }
     private fun poll(c:JSONObject){
         val deadline=c.optLong("deadline")
@@ -339,6 +384,7 @@ class VoiceRuntime internal constructor(context:Context,
             return
         }
         if(c.phase==CallPhase.WAITING_WEB)return
+        c.channel("retiredWeb")?.let{ari.drop(it);c.remove("retiredWeb");journal.put(c)}
         val out=c.channel("outside")?:return
         val remote=ari.channel(out) ?: run{finish(c,"外线已结束");return}
         if(c.phase==CallPhase.DIALING){onChannel(c,out,remote.optString("state"));return}
@@ -363,7 +409,8 @@ class VoiceRuntime internal constructor(context:Context,
     private fun finish(c:JSONObject,reason:String){
         if(c.phase==CallPhase.CALL_ENDED)return
         c.put("finishing",true).put("reason",reason);c.remove("ticket");phase(c,CallPhase.RECOVERING)
-        val legs=listOfNotNull(c.channel("outside"),c.channel("native"),c.channel("web"))
+        c.remove("resumeTicket");c.remove("resumeUntil")
+        val legs=listOfNotNull(c.channel("outside"),c.channel("native"),c.channel("web"),c.channel("retiredWeb"))
         try{
             for(ch in legs)ari.drop(ch)
             if(legs.isNotEmpty())ari.closeBridge(c.getString("bridge"))

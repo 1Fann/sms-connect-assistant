@@ -63,6 +63,12 @@ export function Calling({lines,number,setNumber,enabled,lineHint,onBusy,openSett
     if(!call?.answeredAt||!activeId)return;
     const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);
   },[activeId,call?.answeredAt]);
+  useEffect(()=>{
+    if(!activeId||!['WEB_ACTIVE','HANDOFF_FAILED','RECOVERING'].includes(call?.state||''))return;
+    const restore=()=>{if(!document.hidden)play()};
+    restore();window.addEventListener('focus',restore);document.addEventListener('visibilitychange',restore);
+    return()=>{window.removeEventListener('focus',restore);document.removeEventListener('visibilitychange',restore)};
+  },[activeId,call?.state]);
   function handoffBody(){
     handoff.current||=sessionStorage.getItem('phone.handoff')||crypto.randomUUID();
     sessionStorage.setItem('phone.handoff',handoff.current);
@@ -84,13 +90,26 @@ export function Calling({lines,number,setNumber,enabled,lineHint,onBusy,openSett
       const user=new SimpleUser(config.wss,{aor:config.uri,sendDTMFUsingSessionDescriptionHandler:true,media:{constraints:{audio:true,video:false},remote:{audio:audio.current}},
         userAgentOptions:{sessionDescriptionHandlerFactory:local.factory,authorizationUsername:config.username,authorizationPassword:config.password,logBuiltinEnabled:false,
           sessionDescriptionHandlerFactoryOptions:{peerConnectionConfiguration:{iceServers:config.iceServers||[]}}},
-        delegate:{onCallAnswered:()=>{setMedia('SIP 已应答');play()},onCallHangup:()=>{capture.current?.release();setMedia('网页通道已关闭')},
-          onServerDisconnect:()=>setMedia('信令连接已断开'),onCallHold:setHeld}});
+        delegate:{onCallAnswered:()=>{if(capture.current!==local)return;setMedia('SIP 已应答');play()},onCallHangup:()=>{local.release();if(capture.current===local)setMedia('网页通道已关闭，可恢复网页通话')},
+          onServerDisconnect:()=>{if(capture.current===local)setMedia('信令连接已断开')},onCallHold:value=>{if(capture.current===local)setHeld(value)}}});
       sip.current=user;await user.connect();
       if(local.isClosed)throw new DOMException('通话已取消','AbortError');
       await user.register();
       if(local.isClosed)throw new DOMException('通话已取消','AbortError');
       return user;
+  }
+  async function resumeWeb(){
+    if(pending.current||!activeId)return;
+    pending.current=true;setBusy(true);setError('');setMedia('正在恢复原通话');
+    try{
+      // Opening the microphone stays inside this tap, including after CallKit interrupted capture.
+      const user=await webSession();
+      const result=await api<PbxCall>('calls/'+activeId+'/resume',{});
+      if(!result.target||!/^sip:cl-[0-9a-f]{32}@[A-Za-z0-9.-]+$/.test(result.target))throw Error('恢复票据无效');
+      setCall(result);await user.call(result.target);setMuted(false);setHeld(false);
+      handoff.current='';sessionStorage.removeItem('phone.handoff');
+    }catch(e){setError(err(e));detach()}
+    finally{pending.current=false;setBusy(false)}
   }
   async function dial(resume=false){
     const recovering=resume&&call?.state==='WAITING_WEB'&&activeId===call.id;
@@ -133,6 +152,8 @@ export function Calling({lines,number,setNumber,enabled,lineHint,onBusy,openSett
       </div>}
       {dtmf&&<button className="hide-keypad" onClick={()=>setDtmf(false)}>隐藏拨号键盘</button>}
       {call?.state==='WAITING_WEB'&&(!sip.current||error)&&<button disabled={busy} onClick={()=>void dial(true)}>继续连接此通话</button>}
+      {call&&['HANDOFF_FAILED','RECOVERING','WEB_ACTIVE'].includes(call.state)&&<button disabled={busy} onClick={()=>void resumeWeb()}>恢复网页通话</button>}
+      {call?.state==='RECOVERING'&&<p className="hint">原通话暂时保留，请在一分钟内恢复，不会重新拨号。</p>}
       <button className="hangup" aria-label="挂断" disabled={busy} onClick={()=>void action(()=>api('calls/'+activeId+'/hangup',{}))}><PhoneIcon name="phone" size={32}/></button>
       <details className="call-diagnostics"><summary>音频状态</summary><p>{media} {call?.reason}</p>{audioStats&&<small>{audioStats}</small>}</details>
     </section>:<section className="dialer-screen">

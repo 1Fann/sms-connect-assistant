@@ -132,6 +132,60 @@ class VoiceRuntimeIntegrationTest {
         assertEquals("CALL_ENDED",retry["state"]);assertNull(retry["target"])
         assertEquals(1,pbx.dials.size)
     }
+    @Test fun rejectedNativeKeepsWebAndCanReplaceInterruptedAudioWithoutRedial(){
+        val outside=webStart()
+        engine.handoff(id,owner,UUID.randomUUID().toString())
+        val native=pbx.legsByRole.getValue("native").single()
+        pbx.disconnect(native)
+        assertEquals("HANDOFF_FAILED",phase())
+        assertEquals(setOf(outside,"web-1"),pbx.bridges.getValue("cl-"+id).toSet())
+        val target=engine.resumeWeb(id,owner).getValue("target").toString().substringAfter("sip:").substringBefore('@')
+        assertEquals(target,engine.resumeWeb(id,owner).getValue("target").toString().substringAfter("sip:").substringBefore('@'))
+        pbx.joinWeb("web-2",target)
+        assertEquals("WEB_ACTIVE",phase())
+        assertEquals(setOf(outside,"web-2"),pbx.bridges.getValue("cl-"+id).toSet())
+        assertEquals(1,pbx.dials.count{it==outside});assertFalse(outside in pbx.deleted)
+        pbx.joinWeb("replay-resume",target);assertFalse("replay-resume" in pbx.channels)
+        assertEquals("WEB_ACTIVE",phase())
+    }
+    @Test fun rejectionAndBrowserLossInEitherOrderKeepOriginalOutsideForRecovery(){
+        val outside=webStart()
+        engine.handoff(id,owner,UUID.randomUUID().toString())
+        val native=pbx.legsByRole.getValue("native").single()
+        pbx.disconnect("web-1");pbx.disconnect(native)
+        assertEquals("RECOVERING",phase());assertTrue(outside in pbx.channels)
+        val target=engine.resumeWeb(id,owner).getValue("target").toString().substringAfter("sip:").substringBefore('@')
+        pbx.joinWeb("web-2",target)
+        assertEquals("WEB_ACTIVE",phase());assertEquals(1,pbx.dials.count{it==outside})
+        engine.handoff(id,owner,UUID.randomUUID().toString())
+        pbx.disconnect(pbx.legsByRole.getValue("native").last());pbx.disconnect("web-2")
+        assertEquals("RECOVERING",phase());assertTrue(outside in pbx.channels)
+        time+=61_000;engine.tick()
+        assertEquals("CALL_ENDED",phase());assertTrue(pbx.channels.isEmpty())
+    }
+    @Test fun unansweredNativeWithLostBrowserAlsoAllowsRecovery(){
+        val outside=webStart()
+        engine.handoff(id,owner,UUID.randomUUID().toString());pbx.disconnect("web-1")
+        time+=36_000;engine.tick()
+        assertEquals("RECOVERING",phase());assertTrue(outside in pbx.channels)
+        val target=engine.resumeWeb(id,owner).getValue("target").toString().substringAfter("sip:").substringBefore('@')
+        pbx.joinWeb("web-2",target);assertEquals("WEB_ACTIVE",phase())
+        assertEquals(1,pbx.dials.count{it==outside})
+    }
+    @Test fun recoveryRequiresOwnerAndCurrentGrantAndCannotResurrectEndedCalls(){
+        webStart()
+        assertEquals(403,(runCatching{engine.resumeWeb(id,"someone-else")}.exceptionOrNull() as VoiceFault).code)
+        permission=false
+        assertEquals(403,(runCatching{engine.resumeWeb(id,owner)}.exceptionOrNull() as VoiceFault).code)
+        permission=true
+        val target=engine.resumeWeb(id,owner).getValue("target").toString().substringAfter("sip:").substringBefore('@')
+        permission=false;pbx.joinWeb("revoked-web",target)
+        assertFalse("revoked-web" in pbx.channels);assertEquals("WEB_ACTIVE",phase())
+        permission=true;engine.hangup(id,owner)
+        assertEquals(409,(runCatching{engine.resumeWeb(id,owner)}.exceptionOrNull() as VoiceFault).code)
+        pbx.joinWeb("late-web",target);assertFalse("late-web" in pbx.channels)
+        assertEquals("CALL_ENDED",phase());assertEquals(1,pbx.legsByRole.getValue("outside").size)
+    }
 }
 
 private class FixturePbx:AriClient({error("Network access is forbidden in this fixture")}) {
@@ -174,6 +228,12 @@ private class FixturePbx:AriClient({error("Network access is forbidden in this f
     fun state(id:String,state:String){
         val ch=channels.getValue(id).put("state",state)
         listener.onMessage(socket,JSONObject().put("type","ChannelStateChange").put("channel",ch).toString())
+    }
+    fun disconnect(id:String){
+        val channel=channels.getValue(id)
+        send("DELETE",listOf("channels",id))
+        for(type in listOf("StasisEnd","ChannelDestroyed"))
+            listener.onMessage(socket,JSONObject().put("type",type).put("channel",channel).toString())
     }
     override fun send(method:String,path:List<String>,args:Map<String,String>,missingOk:Boolean):String{
         val group=path[0];val id=path[1];val op=path.getOrNull(2)

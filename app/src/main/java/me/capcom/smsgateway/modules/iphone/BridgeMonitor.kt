@@ -80,6 +80,19 @@ object BridgeMonitor {
             val p=prefs(c); val now=System.currentTimeMillis()
             if(!force && (!enabled(c) || !MonitorPolicy.due(now,p.getLong("checked-at",0),minutes(c)))) return@withContext summary(c)
             val phone=c.getSharedPreferences("iphone",0)
+            if(c.getSharedPreferences("peer-client",0).getBoolean("enabled",false)) {
+                val issue=when {
+                    !IphoneService.peerRunning -> {
+                        if(runCatching { IphoneService.start(c) }.isSuccess) "共享同步服务未运行，已请求恢复；请确认自启动和后台权限"
+                        else "共享同步服务未运行，系统未允许自动启动；请打开应用检查后台权限"
+                    }
+                    android.os.SystemClock.elapsedRealtime()-PeerClient.lastProgress>120_000 -> "共享同步心跳超时，请检查系统短信权限与网络"
+                    else -> PeerClient.status
+                }
+                p.edit().putLong("checked-at",now).putString("result",issue).apply()
+                if(!IphoneService.peerRunning || android.os.SystemClock.elapsedRealtime()-PeerClient.lastProgress>120_000)notify(c,issue)
+                return@withContext summary(c)
+            }
             if(!phone.getBoolean("enabled",false)) {
                 p.edit().putLong("checked-at",now).putString("result","公网服务已手动关闭或尚未配置，不自动拉起").putInt("failures",0).apply()
                 return@withContext summary(c)

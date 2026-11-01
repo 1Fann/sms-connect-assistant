@@ -37,3 +37,9 @@ Stopping sharing disconnects the sharing phone. Revoking the peer on the server 
 ### Custom names (0.8.2)
 
 In the iPhone settings, open the phone and SIM naming section, edit each name, and press Save. Names support up to 30 characters; saving an empty name restores the default. Cached sharing-phone lines can be renamed while offline. Aliases are stored on the server phone and appear on other paired iPhones after refresh. They do not rename the Android device or carrier. Message sources, details, and sending selectors use these aliases while the physical phone and SIM routing stays unchanged. Revoking the sharing phone also clears its phone and SIM aliases.
+
+## 0.8.3 可靠性交接 / Reliable handoff
+
+两部手机都升级后启用持久接收确认及发送提交防重复。旧客户端仍能连接，但不补发旧版本遗留的未知发送任务。新共享收件可触发服务器 Web Push；需先在 iPhone 授权订阅，首次导入旧短信不提醒。发送结果未知时先核实，勿直接新建相同短信。详见 [0.8.3 中英文说明](releases/v0.8.3.md)。
+
+Upgrade both phones for durable receive acknowledgements and submission deduplication. Legacy clients still connect, but ambiguous old jobs are not blindly replayed. New shared incoming SMS can trigger the server Web Push subscription; authorize it on the iPhone first. Initial historical imports do not generate alerts. Verify unknown send outcomes before creating another request. See the [0.8.3 notes](releases/v0.8.3.md).

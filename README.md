@@ -4,9 +4,9 @@
 
 让自己的 Android 手机作为短信终端，在 iPhone 的主屏幕网页应用中查看、接收和发送短信。单个 APK 内置 HTTPS 服务和网页，不需要电脑持续运行。
 
-**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.8.2**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
+**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.8.3**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
 
-0.8.2 新增双手机配对共享及手机 / SIM 自定义名称，默认按服务器手机和共享手机区分，不限制品牌。升级保留已有配对和短信记录。[双手机配置](docs/MULTI_PHONE.md) · [中英文更新说明](docs/releases/v0.8.2.md)。
+0.8.3 加固发送防重复、双手机任务确认、共享短信推送和送达回执。0.8.2 新增双手机配对共享及手机 / SIM 自定义名称，默认按服务器手机和共享手机区分，不限制品牌。升级保留已有配对和短信记录。[双手机配置](docs/MULTI_PHONE.md) · [中英文更新说明](docs/releases/v0.8.3.md)。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 

@@ -38,6 +38,7 @@ class IphoneService : Service() {
     private val labels by lazy { PhoneLabels(this) }
     private var lastRecovery = 0L
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var peerJob: Job? = null
     private val store by lazy { PrivateStore(this) }
     private val history by lazy { SmsHistory(this, store) }
     private val prefs by lazy { getSharedPreferences("iphone", 0) }
@@ -51,23 +52,28 @@ class IphoneService : Service() {
         // without changing service preferences, copying credentials, or opening UI.
         if (intent?.action == ACTION_REFRESH_ROOT) RootBridge.refreshIfAuthorized(this, discoverExisting=true)
         if (getSharedPreferences("peer-client",0).getBoolean("enabled",false)) {
-            if(starting.compareAndSet(false,true)) scope.launch {
+            if(peerJob?.isActive!=true) peerJob=scope.launch {
+                peerRunning=true
+                try {
+                messages.start(this@IphoneService)
                 // Keep the paired phone's polling alive when its screen is off.
                 // The service releases this lock in onDestroy, including stop-sharing.
                 wakeLock = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
                     .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"iphone:peer").apply { acquire() }
-                PeerClient(this@IphoneService).run(history,store,::messageState){ id,address,body,slot ->
-                    messages.enqueueMessage(SendRequest(EntitySource.Local, Message(id,MessageContent.Text(body),listOf(address),false,Date()),SendParams(true,true,slot,null,null,null)))
+                PeerClient(this@IphoneService).run(history,store,::messageState,{messages.getMessage(it)!=null}){ id,address,body,slot,expires ->
+                    messages.enqueueMessage(SendRequest(EntitySource.Local, Message(id,MessageContent.Text(body),listOf(address),false,Date()),SendParams(true,true,slot,expires?.let{Date(it)},null,null)))
                 }
+                } finally { peerRunning=false }
             }
             return START_STICKY
         }
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
         if (starting.compareAndSet(false,true)) scope.launch {
             try {
+                messages.start(this@IphoneService)
                 synchronized(serverLock) { startServer() }; status = "HTTPS 已监听 [::]:8443；公网连通性未验证"
                 wakeLock = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"iphone:https").apply { acquire() }
-                while(isActive) { delay(10_000); BridgeMonitor.check(this@IphoneService) }
+                while(isActive) { runCatching { hub.flushPush() }; delay(10_000); BridgeMonitor.check(this@IphoneService) }
             }
             catch (_: Exception) { status = "HTTPS 启动失败：请检查证书、私钥密码和端口"; stopSelf() }
         } else if (intent?.action == ACTION_RECOVER) scope.launch {
@@ -214,9 +220,9 @@ class IphoneService : Service() {
                         require(sim != null && SubscriptionsHelper.getActiveSimCards(this@IphoneService).any { it.simNumber == sim })
                         val fingerprint = PrivateStore.hash("$number\u0000$sim\u0000$body")
                         if(!sendLimit.allow()) return@post call.respond(HttpStatusCode.TooManyRequests)
-                        if(store.reserve(id, fingerprint)) messages.enqueueMessage(SendRequest(EntitySource.Local,
+                        store.enqueueOnce(id,fingerprint,{messages.getMessage(id)!=null}) { messages.enqueueMessage(SendRequest(EntitySource.Local,
                             Message(id, MessageContent.Text(body), listOf(number), false, Date()),
-                            SendParams(true, true, sim, null, null, null)))
+                            SendParams(true, true, sim, null, null, null))) }
                         call.respond(HttpStatusCode.Accepted, messageState(id))
                     }
                     get("/api/send/{id}") { val id=call.parameters["id"]!!; require(id.matches(Regex("[a-fA-F0-9-]{36}"))); call.respond(hub.sent(id)?.let {mapOf("id" to id,"state" to it.state)} ?: messageState("iphone:$id")) }
@@ -232,9 +238,10 @@ class IphoneService : Service() {
         }) { requestQueueLimit = 32; runningLimit = 16; maxInitialLineLength = 4096; maxHeaderSize = 8192 }.start(false)
     }
     private fun messageState(id: String): Map<String, String> {
+        if(store.rejected(id))return mapOf("id" to id.removePrefix("iphone:"),"state" to "failed")
         val record = messages.getMessage(id)
         val state = when(record?.message?.state?.name) {
-            "Pending", "Processed" -> "accepted"; "Sent" -> "sent"; "Delivered" -> "delivered"; "Failed", "Cancelled" -> "failed"; else -> "unknown"
+            "Pending" -> "accepted"; "Sent" -> "sent"; "Delivered" -> "delivered"; "Failed", "Cancelled" -> "failed"; else -> "unknown"
         }
         val result = mutableMapOf("id" to id.removePrefix("iphone:"), "state" to state)
         if (state == "failed") {
@@ -251,6 +258,7 @@ class IphoneService : Service() {
     }
     override fun onDestroy() { scope.cancel(); synchronized(serverLock) { server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
     companion object {
+        @Volatile var peerRunning=false
         const val ACTION_RECOVER = "me.capcom.smsgateway.iphone.RECOVER"
         const val ACTION_CHECK = "me.capcom.smsgateway.iphone.CHECK"
         const val ACTION_REFRESH_ROOT = "me.capcom.smsgateway.iphone.REFRESH_ROOT_GUARD"

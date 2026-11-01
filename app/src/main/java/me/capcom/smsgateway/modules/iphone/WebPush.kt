@@ -56,22 +56,52 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         if(!applicationContext.getSharedPreferences("iphone",0).getBoolean("enabled",false))return@withContext Result.success()
         var retry=false
+        var permanent=false
         PrivateStore(applicationContext).use { store ->
             for(endpoint in store.subscriptions()) {
                 // Recheck on execution and retry: the conversation may have been
                 // muted while offline. The sender stays on Android, never in the push.
                 if(!PushPolicy.allowed(inputData.getString("address"),store.conversations(),inputData.getBoolean("test",false))) return@withContext Result.success()
                 try { when(val status=WebPush(applicationContext).send(endpoint)) {
-                    404,410 -> store.removeSubscription(endpoint)
+                    404,410 -> {
+                        store.removeSubscription(endpoint);permanent=true
+                        applicationContext.getSharedPreferences("iphone",0).edit().putString("push-status","推送订阅已失效，请在 iPhone 重新订阅").apply()
+                    }
                     429 -> retry=true
                     in 500..599 -> retry=true
-                    else -> applicationContext.getSharedPreferences("iphone",0).edit().putString("push-status",if(status in 200..299) "推送请求提交成功；设备是否收到待确认" else "推送服务拒绝（HTTP $status），请重新订阅").apply()
-                } } catch(_: Exception) { retry=true }
+                    else -> {
+                        if(status !in 200..299)permanent=true
+                        if(status !in 200..299 || !permanent)applicationContext.getSharedPreferences("iphone",0).edit().putString("push-status",if(status in 200..299) "推送请求提交成功；设备是否收到待确认" else "推送服务拒绝（HTTP $status），请重新订阅").apply()
+                    }
+                } } catch(e: Exception) { if(e is kotlinx.coroutines.CancellationException)throw e;retry=true }
             }
         }
-        if(retry && runAttemptCount<3)Result.retry() else Result.success()
+        // A locally connected network can remain unable to reach Apple for hours.
+        // Keep retryable failures durable under WorkManager's exponential backoff.
+        if(retry) {
+            applicationContext.getSharedPreferences("iphone",0).edit().putString("push-status",if(permanent)"部分订阅需重新授权；暂时不可达的推送已保留重试" else "推送暂不可达，任务已保留并自动退避重试").apply()
+            Result.retry()
+        } else Result.success()
     }
     companion object {
+        fun enqueuePeer(context:Context,address:String,event:String) {
+            if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
+            if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return
+            val operation=WorkManager.getInstance(context).enqueueUniqueWork("iphone-push-"+event,ExistingWorkPolicy.KEEP,
+                OneTimeWorkRequestBuilder<WebPushWorker>().setInputData(workDataOf("address" to address.take(100)))
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build())
+            // Called only from the IO service loop. Keep the journal until WorkManager
+            // confirms its own transaction committed, with a bounded wait.
+            repeat(200) {
+                when(val state=operation.state.value) {
+                    is Operation.State.SUCCESS -> return
+                    is Operation.State.FAILURE -> throw IllegalStateException("Push enqueue failed",state.throwable)
+                }
+                Thread.sleep(50)
+            }
+            throw IllegalStateException("Push enqueue confirmation timed out")
+        }
         fun enqueue(context: Context, address: String) {
             if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
             if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return

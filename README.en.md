@@ -4,9 +4,9 @@
 
 Use your own Android phone as an SMS endpoint and read, receive, and send messages from an iPhone Home Screen web app. A single APK contains the HTTPS server and web interface; no continuously running computer is required.
 
-**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.8.2**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
+**The application interface remains Chinese; repository documentation is bilingual.** The current version is **0.8.3**, pending broader device coverage and long-term testing. Based on [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway), under Apache-2.0. This project is not affiliated with Apple, Google, Xiaomi, or the upstream project.
 
-0.8.2 adds two-phone sharing and custom phone/SIM names. Phones use server and sharing roles without a brand restriction; existing pairings and message identities survive the update. See [two-phone setup](docs/MULTI_PHONE.md) and [bilingual release notes](docs/releases/v0.8.2.md).
+0.8.3 hardens submission deduplication, paired-phone acknowledgements, shared SMS push and delivery tracking. 0.8.2 adds two-phone sharing and custom phone/SIM names. Phones use server and sharing roles without a brand restriction; existing pairings and message identities survive the update. See [two-phone setup](docs/MULTI_PHONE.md) and [bilingual release notes](docs/releases/v0.8.3.md).
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 

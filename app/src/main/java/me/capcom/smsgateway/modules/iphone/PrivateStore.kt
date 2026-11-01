@@ -7,16 +7,22 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Only hashes and metadata are stored here, never SMS bodies or raw session keys. */
-class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", null, 5) {
+class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", null, 6) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE sessions (hash TEXT PRIMARY KEY, name TEXT NOT NULL, expires INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE requests (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, created INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE requests (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, created INTEGER NOT NULL, generation INTEGER NOT NULL DEFAULT 1, rejected INTEGER NOT NULL DEFAULT 0)")
+        createSubmissionJournal(db)
         db.execSQL("CREATE TABLE reads (address TEXT PRIMARY KEY, seen INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE subscriptions (endpoint TEXT PRIMARY KEY, owner TEXT NOT NULL)")
         db.execSQL("CREATE TABLE refresh (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL)")
         createConversations(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
+        if(old<6) {
+            db.execSQL("ALTER TABLE requests ADD COLUMN generation INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE requests ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0")
+            createSubmissionJournal(db)
+        }
         if(old<2) db.execSQL("CREATE TABLE subscriptions (endpoint TEXT PRIMARY KEY, owner TEXT NOT NULL)")
         if(old<3) db.execSQL("CREATE TABLE refresh (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL)")
         if(old<4) createConversations(db)
@@ -25,6 +31,31 @@ class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", nu
             db.execSQL("ALTER TABLE conversations ADD COLUMN region TEXT NOT NULL DEFAULT 'CN'")
         }
     }
+    private fun createSubmissionJournal(db:SQLiteDatabase) {
+        db.execSQL("CREATE TABLE submissions(id TEXT NOT NULL, phone TEXT NOT NULL, PRIMARY KEY(id,phone))")
+        db.execSQL("CREATE TABLE peer_receipts(id TEXT PRIMARY KEY)")
+    }
+    /** A durable claim precedes the modem call. Never erase it when message logs expire. */
+    fun claimSubmission(id:String,phone:String):Boolean = synchronized(REQUEST_LOCK) {
+        val values=android.content.ContentValues().apply { put("id",id);put("phone",phone) }
+        writableDatabase.insertWithOnConflict("submissions",null,values,SQLiteDatabase.CONFLICT_IGNORE)!=-1L
+    }
+    fun rejected(id:String):Boolean = readableDatabase.rawQuery("SELECT rejected FROM requests WHERE id=?",arrayOf(id)).use { it.moveToFirst() && it.getInt(0)!=0 }
+    /** Generation 2 can repair reserve-before-enqueue crashes; modem claims make replay safe. */
+    fun enqueueOnce(id:String,fingerprint:String,present:()->Boolean,enqueue:()->Unit) = synchronized(REQUEST_LOCK) {
+        val generation=readableDatabase.rawQuery("SELECT fingerprint,generation,rejected FROM requests WHERE id=?",arrayOf(id)).use {
+            if(!it.moveToFirst())null else { require(it.getString(0)==fingerprint); if(it.getInt(2)!=0)return@synchronized;it.getInt(1) }
+        }
+        if(generation==1 || present())return@synchronized // Legacy ambiguity remains non-retryable.
+        if(generation==null)writableDatabase.execSQL("INSERT INTO requests(id,fingerprint,created,generation) VALUES(?,?,?,2)",arrayOf(id,fingerprint,System.currentTimeMillis()))
+        enqueue()
+    }
+    fun rejectPeer(id:String,fingerprint:String) = synchronized(REQUEST_LOCK) {
+        enqueueOnce(id,fingerprint,{false}) { writableDatabase.execSQL("UPDATE requests SET rejected=1 WHERE id=?",arrayOf(id)) }
+    }
+    fun receipt(id:String) { writableDatabase.execSQL("INSERT OR IGNORE INTO peer_receipts VALUES(?)",arrayOf(id)) }
+    fun receipts():List<String> = readableDatabase.rawQuery("SELECT id FROM peer_receipts ORDER BY rowid LIMIT 100",null).use { c->buildList { while(c.moveToNext())add(c.getString(0)) } }
+    fun acknowledgeReceipts(ids:List<String>) { val db=writableDatabase;db.beginTransaction();try { ids.forEach { db.delete("peer_receipts","id=?",arrayOf(it)) };db.setTransactionSuccessful() }finally{db.endTransaction()} }
     private fun createConversations(db: SQLiteDatabase) = db.execSQL("CREATE TABLE conversations (address TEXT PRIMARY KEY, pinned INTEGER NOT NULL, removed_before INTEGER NOT NULL, unread INTEGER NOT NULL, muted INTEGER NOT NULL DEFAULT 0, region TEXT NOT NULL DEFAULT 'CN')")
     fun conversations(): List<ConversationState> = readableDatabase.rawQuery("SELECT address,pinned,removed_before,unread,muted,region FROM conversations",null).use { c ->
         buildList { while(c.moveToNext()) add(ConversationState(c.getString(0),c.getLong(1),c.getLong(2),c.getInt(3)!=0,c.getInt(4)!=0,c.getString(5))) }
@@ -84,12 +115,13 @@ class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", nu
         readableDatabase.rawQuery("SELECT fingerprint FROM requests WHERE id=?", arrayOf(id)).use {
             if (it.moveToFirst()) { require(it.getString(0) == fingerprint) { "请求标识已被其他内容使用" }; return false }
         }
-        writableDatabase.execSQL("INSERT INTO requests VALUES(?,?,?)", arrayOf(id, fingerprint, System.currentTimeMillis()))
+        writableDatabase.execSQL("INSERT INTO requests(id,fingerprint,created) VALUES(?,?,?)", arrayOf(id, fingerprint, System.currentTimeMillis()))
         return true
     }
     fun seen(address: String): Long = readableDatabase.rawQuery("SELECT seen FROM reads WHERE address=?", arrayOf(address)).use { if(it.moveToFirst()) it.getLong(0) else 0L }
     fun markRead(address: String, time: Long) = writableDatabase.execSQL("INSERT OR REPLACE INTO reads VALUES(?,?)", arrayOf(address, time))
     companion object {
+        private val REQUEST_LOCK=Any()
         fun token(): String = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
         fun hash(s: String): String = MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
     }

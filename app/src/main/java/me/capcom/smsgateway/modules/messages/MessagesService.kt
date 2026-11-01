@@ -614,9 +614,12 @@ class MessagesService(
                     }
                     me.capcom.smsgateway.modules.defaultsms.DefaultSms.note(context,
                         "正在提交手机短信接口；默认角色=${me.capcom.smsgateway.modules.defaultsms.DefaultSms.isDefault(context)}；系统短信包匹配=${android.provider.Telephony.Sms.getDefaultSmsPackage(context) == context.packageName}")
-                    sendFn(normalizedPhoneNumber, sentIntent, deliveredIntent)
-
-                    machine.transitionRecipient(id, sourcePhoneNumber, ProcessingState.Processed)
+                    // Claim durably before crossing the modem boundary. A restarted worker
+                    // must not resend an ambiguous submission, even after log retention.
+                    SubmissionGate.submit(
+                        claim={me.capcom.smsgateway.modules.iphone.PrivateStore(context).use {it.claimSubmission(id,sourcePhoneNumber)}},
+                        mark={machine.transitionRecipient(id,sourcePhoneNumber,ProcessingState.Processed)},
+                        send={sendFn(normalizedPhoneNumber,sentIntent,deliveredIntent)})
                 } catch (th: Throwable) {
                     me.capcom.smsgateway.modules.defaultsms.DefaultSms.note(context,
                         "提交短信前失败：${th.javaClass.simpleName}")
@@ -629,15 +632,14 @@ class MessagesService(
                         )
                     )
 
-                    runCatching { me.capcom.smsgateway.modules.defaultsms.DefaultSmsStore(context).use {
-                        it.callback(id, sourcePhoneNumber, "sent", 0, true)
-                    } }
-                    machine.transitionRecipient(
-                        id,
-                        sourcePhoneNumber,
-                        ProcessingState.Failed,
-                        "sendSMS: " + th.message
-                    )
+                    // After the durable transition, an exception can mean the modem
+                    // accepted the request. Keep UNKNOWN until an actual callback arrives.
+                    if (dao.get(id)?.recipients?.firstOrNull { it.phoneNumber==sourcePhoneNumber }?.state==ProcessingState.Pending) {
+                        runCatching { me.capcom.smsgateway.modules.defaultsms.DefaultSmsStore(context).use {
+                            it.callback(id, sourcePhoneNumber, "sent", 0, true)
+                        } }
+                        machine.transitionRecipient(id,sourcePhoneNumber,ProcessingState.Failed,"sendSMS: "+th.message)
+                    }
                 }
             }
     }

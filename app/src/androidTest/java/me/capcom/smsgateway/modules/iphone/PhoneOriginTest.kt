@@ -4,8 +4,6 @@ import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.routing.*
-import io.ktor.server.websocket.*
-import io.ktor.websocket.*
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import okhttp3.OkHttpClient
@@ -66,49 +64,17 @@ class PhoneOriginTest {
             val cookie="__Host-phone="+token
             assertEquals(200,response("/api/v2/session",cookie))
             assertEquals(403,response("/api/v2/contacts",cookie))
-            assertEquals(403,response("/api/v2/voice/web-session",cookie,origin))
+            assertEquals(410,response("/api/v2/voice/web-session",cookie,origin))
+            assertEquals(403,response("/api/v2/groundwire/routes",cookie))
+            assertEquals(404,response("/ws",cookie))
             assertEquals(403,response("/api/logout",cookie,"https://untrusted.invalid"))
             assertEquals(200,response("/api/v2/session",cookie))
             assertTrue(response("/api/send",cookie,origin) in setOf(404,405))
-            // Real WSS -> loopback WS, with per-install authorization and live revocation.
-            val backendPort=java.net.ServerSocket(0,1,java.net.InetAddress.getByName("127.0.0.1")).use{it.localPort}
-            val forwarded=java.util.concurrent.atomic.AtomicInteger()
-            val backend=embeddedServer(Netty,port=backendPort,host="127.0.0.1"){
-                install(WebSockets)
-                routing{webSocket("/ws","sip"){
-                    forwarded.incrementAndGet()
-                    for(frame in incoming)if(frame is Frame.Text)send(Frame.Text(frame.readText()))
-                }}
-            }.start(false)
-            val config=ctx.getSharedPreferences("commlink-voice",0)
-            config.edit().putBoolean("enabled",true).putInt("port",backendPort).commit()
-            fun connect(cookie:String,from:String,received:java.util.concurrent.CompletableFuture<String>,closed:java.util.concurrent.CountDownLatch):okhttp3.WebSocket {
-                return client.newWebSocket(Request.Builder().url(origin.replace("https:","wss:")+"/ws")
-                    .header("Sec-WebSocket-Protocol","sip").header("Cookie",cookie).header("Origin",from).build(),object:okhttp3.WebSocketListener(){
-                    override fun onOpen(ws:okhttp3.WebSocket,r:okhttp3.Response){ws.send("OPTIONS sip:fixture.invalid SIP/2.0")}
-                    override fun onMessage(ws:okhttp3.WebSocket,text:String){received.complete(text)}
-                    override fun onClosing(ws:okhttp3.WebSocket,code:Int,reason:String){ws.close(code,null);closed.countDown()}
-                    override fun onFailure(ws:okhttp3.WebSocket,t:Throwable,r:okhttp3.Response?){received.completeExceptionally(t);closed.countDown()}
-                })
-            }
-            try{
-                val dial=PrivateStore.token();db.authorize(dial,PrivateStore.Install("Dial","phone","dial","calls.read,calls.dial,device:server"))
-                for((badCookie,badOrigin) in listOf(cookie to origin,("__Host-phone="+dial) to "https://untrusted.invalid")){
-                    val closed=java.util.concurrent.CountDownLatch(1)
-                    val ws=connect(badCookie,badOrigin,java.util.concurrent.CompletableFuture(),closed)
-                    assertTrue(closed.await(8,java.util.concurrent.TimeUnit.SECONDS));ws.cancel()
-                    assertEquals(0,forwarded.get())
-                }
-                val received=java.util.concurrent.CompletableFuture<String>()
-                val closed=java.util.concurrent.CountDownLatch(1)
-                val ws=connect("__Host-phone="+dial,origin,received,closed)
-                try{
-                    assertEquals("OPTIONS sip:fixture.invalid SIP/2.0",received.get(8,java.util.concurrent.TimeUnit.SECONDS))
-                    assertEquals(1,forwarded.get())
-                    db.revokeInstallation("dial")
-                    assertTrue("Revoked WSS must close",closed.await(8,java.util.concurrent.TimeUnit.SECONDS))
-                }finally{ws.cancel()}
-            }finally{config.edit().clear().commit();backend.stop(300,1500)}
+            val dial=PrivateStore.token()
+            db.authorize(dial,PrivateStore.Install("Dial","phone","dial","calls.read,calls.dial,device:server"))
+            assertEquals(200,response("/api/v2/groundwire/routes","__Host-phone="+dial))
+            for(path in listOf("/api/v2/calls","/api/v2/calls/fixture/handoff","/api/v2/calls/fixture/resume"))
+                assertEquals(410,response(path,"__Host-phone="+dial,origin))
             db.revokeInstallation("p")
             assertEquals(401,response("/api/v2/session",cookie))
         } finally {phone.stop();db.close();hub.close();client.connectionPool.evictAll();ctx.deleteDatabase("origin-fixture.db");ctx.deleteDatabase("origin-peer-fixture.db")}

@@ -1,0 +1,28 @@
+; Native Groundwire dialing. Include commlink-groundwire-out from the authenticated phone context.
+; Example deployment: authenticated Groundwire accounts 1001/1002, VSA gateway 2001.
+; Prefixes select the SIM explicitly, independent of Groundwire's selected account.
+[commlink-groundwire-out]
+exten => _*81*.,1,Gosub(commlink-native-dial,s,1(${EXTEN:4},1))
+ same => n,Hangup()
+exten => _*82*.,1,Gosub(commlink-native-dial,s,1(${EXTEN:4},2))
+ same => n,Hangup()
+
+[commlink-native-dial]
+exten => s,1,GotoIf($["${CHANNEL(endpoint)}"="1001" | "${CHANNEL(endpoint)}"="1002"]?authorized:invalid)
+ same => n(authorized),Set(__VSA_TARGET=${FILTER(0-9+,${ARG1})})
+ same => n,GotoIf($[${LEN(${ARG1})}!=${LEN(${VSA_TARGET})}]?invalid)
+ same => n,GotoIf($[${REGEX("^[+]?[0-9]{3,20}$" ${VSA_TARGET})}=0]?invalid)
+ same => n,GotoIf($["${VSA_TARGET}"="110" | "${VSA_TARGET}"="112" | "${VSA_TARGET}"="119" | "${VSA_TARGET}"="120" | "${VSA_TARGET}"="911" | "${VSA_TARGET}"="+110" | "${VSA_TARGET}"="+112" | "${VSA_TARGET}"="+119" | "${VSA_TARGET}"="+120" | "${VSA_TARGET}"="+911"]?invalid)
+ same => n,Set(__VSA_SIM=${ARG2})
+ same => n,GotoIf($["${VSA_SIM}"="1" | "${VSA_SIM}"="2"]?route:invalid)
+ same => n(route),Set(VSA_CONTACTS=${PJSIP_DIAL_CONTACTS(2001)})
+ same => n,GotoIf($[${LEN(${VSA_CONTACTS})}=0]?unavailable)
+ same => n,Dial(${VSA_CONTACTS},60,b(commlink-native-header^s^1))
+ same => n,Return()
+ same => n(unavailable),Hangup(20)
+ same => n(invalid),Hangup(28)
+
+[commlink-native-header]
+exten => s,1,Set(PJSIP_HEADER(add,X-VSA-Dial)=${VSA_TARGET})
+ same => n,Set(PJSIP_HEADER(add,X-VSA-SIM)=${VSA_SIM})
+ same => n,Return()

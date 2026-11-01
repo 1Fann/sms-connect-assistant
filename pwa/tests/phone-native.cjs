@@ -10,6 +10,12 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  try{
  const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
  let installation='native-fixture';const page=await context.newPage(),errors=[],writes=[];
+ await page.addInitScript(()=>{
+  navigator.mediaDevices.getUserMedia=()=>{throw Error('The phone page must never request a microphone')};
+  window.WebSocket=class{constructor(){throw Error('The phone page must never open SIP/WebSocket')}};
+  window.fixtureLaunches=[];
+  window.addEventListener('click',event=>{const link=event.target.closest('a[href^="groundwire:"]');if(link){event.preventDefault();window.fixtureLaunches.push(link.getAttribute('href'))}},true);
+ });
  page.on('pageerror',e=>errors.push(e.message));
  await context.route('**/api/**',route=>{
   const req=route.request(),url=new URL(req.url()),key=url.pathname.replace('/api/v2/','');
@@ -18,7 +24,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
   const data={
    session:{installationId:installation,permissions:['calls.read','calls.dial','contacts.read']},
    devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · SIM 1',slot:1,lineOnline:true,online:true,confirmed:true}],
-   'voice/status':{ready:true,reason:'',gateways:[{deviceId:'server',registered:true,busy:false}]},'voice/history':[],
+   'groundwire/routes':{routes:[{lineId:'line-a',prefix:'*81*'}]},'voice/history':[],
    'call-history':{items:records,next:null},contacts:{items:[{id:'c',name:'演示联系人',numbers:['5550100'],favorite:false,revision:1,sources:[]}],next:null}
   };
   assert.ok(key in data,'Unexpected API '+key);
@@ -51,6 +57,11 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  for(const k of ['1','2','3'])await page.getByRole('button',{name:k,exact:true}).click();
  assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),'123');
  assert.equal(await page.getByRole('button',{name:'拨打',exact:true}).isEnabled(),true);
+ assert.equal(await page.getByRole('button',{name:'拨打',exact:true}).getAttribute('href'),'groundwire:*81*123?dialAction=voiceCall');
+ await page.getByRole('button',{name:'拨打',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>window.fixtureLaunches),['groundwire:*81*123?dialAction=voiceCall']);
+ assert.equal(await page.locator('audio').count(),0);
+
  await page.screenshot({path:path.join(out,'keypad-light.png')});
  await page.getByRole('button',{name:'退格',exact:true}).click();assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),'12');
  await page.getByRole('button',{name:'退格',exact:true}).click();await page.getByRole('button',{name:'退格',exact:true}).click();
@@ -65,6 +76,6 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.getByRole('button',{name:'取消搜索'}).click();await page.locator('nav button').filter({hasText:'联系人'}).click();await page.getByRole('button',{name:'演示联系人',exact:true}).waitFor();
  await page.screenshot({path:path.join(out,'contacts.png')});
  assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
- console.log('PASS native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
+ console.log('PASS Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

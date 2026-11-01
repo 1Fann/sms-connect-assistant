@@ -1,4 +1,4 @@
-const cacheName='commlink-phone-shell-v1';
+const cacheName='commlink-phone-shell-v2';
 const app='/phone/';
 const shell=[app,app+'manifest.webmanifest',app+'icon-192.png',app+'icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(cacheName).then(cache=>cache.addAll(shell))));

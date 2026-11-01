@@ -4,9 +4,11 @@
 
 CommLink 在一部 Android 上聚合多部已授权手机的 SIM、短信、通讯录和通话记录。iPhone 从主屏幕分别打开「互联信息」和「互联电话」。日常短信仍使用原安装入口及系统库。语音使用独立的 Voice SIP Agent、Asterisk 和 Groundwire；启用前须完成网关选卡、PBX 和媒体验证。
 
-**开发版 0.9.0-dev（24）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。稳定发布与本开发分支的设备、权限及网页结构有差异。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
+**开发版 0.9.0-dev6（29）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。稳定发布与本开发分支的设备、权限及网页结构有差异。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
+
+电话网页的拨号按钮会直接打开 Groundwire 发起语音通话，按明确的服务器前缀选择设备和 SIM。网页不再采集麦克风、运行 WebRTC 或进行后台接续；原生通话由 Groundwire 从开始到结束承载，安卓通话记录继续同步。
 
 ## 功能
 

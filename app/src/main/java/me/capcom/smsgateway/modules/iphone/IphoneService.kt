@@ -89,7 +89,7 @@ class IphoneService : Service() {
             try {
                 messages.start(this@IphoneService)
                 synchronized(serverLock) { startServer() }
-                runCatching { me.capcom.smsgateway.modules.voice.VoiceRuntime.get(this@IphoneService).start() }
+                retireBrowserVoice()
                 directoryJob=scope.launch {
                     while(isActive) {
                         runCatching { directory.tickLocal("server") }
@@ -111,24 +111,35 @@ class IphoneService : Service() {
                 }
             }
         }
-        if(intent?.action=="me.capcom.smsgateway.iphone.PROVISION_VOICE") scope.launch {
-            val file=java.io.File(noBackupFilesDir,"commlink-voice-import.json")
+        if(intent?.action=="me.capcom.smsgateway.iphone.PROVISION_GROUNDWIRE") scope.launch {
+            val file=java.io.File(noBackupFilesDir,"commlink-groundwire-import.json")
             try {
                 require(file.length() in 2..65536)
                 val b=org.json.JSONObject(file.readText())
-                val host=prefs.getString("host","")!!
-                me.capcom.smsgateway.modules.voice.VoiceConfiguration(this@IphoneService).save(
-                    true,b.getInt("port"),b.getString("ariUser"),b.getString("ariPassword"),
-                    "wss://"+host+":8444/ws",host,b.getString("webUser"),b.getString("webPassword"),
-                    b.getString("nativeUser"),b.getString("nativePassword"),b.getString("bindings"),b.optString("ice"),b.getString("dialRules"))
-                me.capcom.smsgateway.modules.voice.VoiceRuntime.get(this@IphoneService).reconfigure()
-                java.io.File(noBackupFilesDir,"commlink-voice-import-result").writeText("ok")
+                val routeText=if(b.has("bindings")){
+                    val bindings=b.getJSONArray("bindings")
+                    (0 until bindings.length()).joinToString("\n"){i->
+                        val binding=bindings.getJSONObject(i)
+                        val line=hub.allLines().single{it["deviceId"]==binding.getString("device") && (it["slot"] as? Number)?.toInt()==binding.getInt("slot")}
+                        require(line["lineOnline"]==true && line["present"]==true && line["confirmed"]==true && line["enabled"]==true)
+                        listOf(line["lineId"],line["deviceId"],line["slot"],line["subscriptionId"],binding.getString("prefix")).joinToString(" ")
+                    }
+                }else b.getString("routes")
+                me.capcom.smsgateway.modules.voice.GroundwireConfiguration(this@IphoneService).save(
+                    b.getString("server"),b.getString("account"),routeText,b.optString("password"))
+                java.io.File(noBackupFilesDir,"commlink-groundwire-import-result").writeText("ok")
             }catch(_:Exception) {
-                java.io.File(noBackupFilesDir,"commlink-voice-import-result").writeText("failed")
-            }finally {file.delete()}
+                java.io.File(noBackupFilesDir,"commlink-groundwire-import-result").writeText("failed")
+            }finally{file.delete()}
         }
         if(intent?.action == ACTION_CHECK) scope.launch { BridgeMonitor.check(this@IphoneService,true) }
         return START_STICKY
+    }
+    private fun retireBrowserVoice() {
+        getSharedPreferences("commlink-voice",0).edit().clear().commit()
+        for(name in listOf("voice-web","voice-ari","voice-ice"))
+            java.io.File(noBackupFilesDir,name+".secret").delete()
+        // Keep the old journal as a read-only history archive, and keep the native SIP password.
     }
     private fun startServer() {
         val (keyStore, alias, password) = TlsIdentity(this).load()
@@ -341,7 +352,7 @@ class IphoneService : Service() {
         }
         return result
     }
-    override fun onDestroy() { scope.cancel(); runCatching { me.capcom.smsgateway.modules.voice.VoiceRuntime.get(this).stop() }; synchronized(serverLock) { phoneServer.stop(); server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
+    override fun onDestroy() { scope.cancel(); synchronized(serverLock) { phoneServer.stop(); server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
     companion object {
         @Volatile var peerRunning=false
         const val ACTION_RECOVER = "me.capcom.smsgateway.iphone.RECOVER"

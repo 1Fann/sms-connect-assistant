@@ -1,5 +1,7 @@
 # CommLink 0.9.0-dev · 升级与验收 / Upgrade and acceptance
 
+> 当前开发版为 **0.9.0-dev6 / 29**。电话已改为从拨号开始由 Groundwire 承载；以下旧 WebRTC / ARI 部署与验收记录是历史记录，不代表当前实现。现行配置见 [中文语音指南](VOICE.zh-CN.md)、[English voice guide](VOICE.en.md) 和 [dev6 说明](releases/0.9.0-dev6.md)。
+
 ## 安装边界
 
 这个开发版本从 0.8.9 / 23 增量开发，release 的 applicationId 仍为 `me.capcom.smsgateway.iphone`。使用原签名覆盖升级。数据库升级后，旧 APK 无法直接覆盖回退。测试数据库迁移、隔离安装及带原签名的发布构建是三个不同的检查。日用系统全面切换前，应保留与原签名和私有应用数据相匹配、**实际可恢复**的设备级备份；单独复制 SQLite 文件不能恢复 Android Keystore 密钥。迁移报错时保留原数据，记录数据库版本和脱敏错误，在复制件上修复后用更高 versionCode 覆盖；不要卸载或清数据。

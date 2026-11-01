@@ -23,8 +23,8 @@ android {
         applicationId "me.capcom.smsgateway.iphone"
         minSdk 21
         targetSdk 33
-        versionCode 24
-        versionName "0.9.0-dev"
+        versionCode 25
+        versionName "0.9.0-dev2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -110,6 +110,7 @@ dependencies {
     implementation("io.ktor:ktor-serialization-gson:$ktor_version")
 
     implementation("io.ktor:ktor-server-core:$ktor_version")
+    implementation("io.ktor:ktor-server-websockets:$ktor_version")
     implementation("io.ktor:ktor-server-netty:$ktor_version")
     implementation("io.ktor:ktor-server-compression:$ktor_version")
     implementation("io.ktor:ktor-server-status-pages:$ktor_version")

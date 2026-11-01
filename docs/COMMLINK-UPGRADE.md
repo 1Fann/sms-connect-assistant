@@ -40,12 +40,26 @@
 3. 真实接续放行需要一套经过授权的隔离 PBX、新端点、可信 WSS、媒体协商以及可靠的进线 SIM 映射。分别记录外线 ID、用户侧通道 ID、RTP 变化、接续超时和忙线恢复。先验证一通外线，再验证拒接、无媒体、丢响应和网络切换。
 4. 发布前还要用真 iPhone 验证双图标安装、独立撤权、升级后保留短信 Push、未接提醒归属、通话中退后台和锁屏接听；用两部真实 SIM 手机验收正常收发、第三台设备接入、热换卡、受限系统账号的联系人写回和真实来电记录。合成数据通过不能替代这些结果。
 
-## 本次验证结果
+## 首次可测试交付验证结果（部署前）
 
 - 构建通过：TypeScript、两个 Vite 入口、Android release 和 Android 单元测试（151 项通过）。已核对 APK 的签名证书与 0.8.9 相同，版本 24，应用名称「通讯互联」。
 - 数据与网页：36 项前端单元、9 项短信队列 SQLite、3 项目录 SQL 检查通过；另验证了真实浏览器中的线路选择、禁发和重试、会话状态写入顺序、长按与键盘、目录编辑和未就绪拨号。Node Worker 测试覆盖独立缓存与推送点击目标。
 - 红米 Android 13：测试包与日用短信使用独立 UID，无需授予真实通讯数据权限。17 项 instrumentation 全部通过（目录 5、多节点 6、语音控制器 4、真实回环 TLS 授权/关闭 1、0.8.9 会话迁移 1）。语音控制器测试使用真实 SQLite 和模拟 ARI 对端，不会连接 PBX。测试后已移除两个临时测试包，日用安装仍为 0.8.9。
 - 目前没有独立测试 PBX / 真实测试线路。没有做真实外线呼叫、生产 PBX 变更、iPhone 双 PWA/CallKit 实测、多手机实发或系统联系人实际写回。此版本是可测试交付，不是这些项目的验收证明。
+
+## 2026-11-02 · 主节点部署（0.9.0-dev2 / 25）
+
+用户随后授权了实际部署。此记录取代上面的“日用安装仍为 0.8.9、没有生产 PBX 变更”状态。已用相同签名覆盖升级红米主节点，保留包名和原数据。原短信 HTTPS 8443 的页面、Worker 与健康检查通过。电话 HTTPS 8444 的页面、Manifest 和 Worker 与打包资源一致；未授权 API 返回 401，电话来源没有提供 ARI 路由。用户确认 iPhone 能访问新端口、添加独立图标并完成配对；原信息图标保留。
+
+本次运维显式启用了既有 Asterisk 的 WebSocket、PJSIP WebSocket、ARI/Stasis、SRTP、ICE 等组件。HTTP/ARI 仅绑定回环 127.0.0.1:8088；电话 HTTPS 只将 /ws 代理到本机 SIP WebSocket，要求有效电话安装的拨号授权及相同 Origin。代理限制帧大小和队列，撤权后关闭会话。真实 Android TLS 测试覆盖未授权/跨来源拒绝、文本帧双向代理和持续连接撤权。
+
+网页使用新增受限 SIP 端点。网关绑定既有 2001，接续复用原 Groundwire 1001，不需重新输入 iPhone SIP 凭据。保留原 1001/1002、2001 及既有蜂窝呼入拨号计划。网页 context 只进入 Stasis 短期票据处理，不包含普通外拨路由。数字端点兼容已补单元测试。凭据经设备内 root 私有文件一次导入 Android Keystore，导入文件自动删除，不进入源码、APK、聊天或浏览器管理接口。
+
+实机只读诊断确认：两张 SIM 在线、存在、已确认且启用；电话安装有主节点拨号权限；ARI 已连接，网关和 Groundwire 在线且空闲。完成 SIP Digest 注册及注销，自动检查没有拨打外线。诊断用的临时电话授权已退出，隔离 Android 测试包已移除。签名 release 构建与 152 项 JVM 测试通过。
+
+原 APK 与 PBX 配置备份位于设备 root 专用目录。应用快照在第一次覆盖安装之后取得，不能视为经过验证的完整升级前备份；勿卸载、清数据或直接降级数据库。主配置头部的 include 经网络准备后仍保留；Asterisk 助手的全新初始化可能覆盖集成，执行前须重新备份。
+
+真实外线、双向声音、锁屏 CallKit、后台接续、不同网络媒体、多手机、联系人写回及系统通话记录权限尚待验收。未配置 TURN，跨网直连媒体可用性须实测。多卡蜂窝呼入继续使用旧路线，没有猜测 SIM 来源。仅安装 APK 不会自动创建本次 PBX 私有配置。
 
 ## English
 
@@ -54,3 +68,9 @@ This is a development build based on SMS Connect Assistant 0.8.9. The release pa
 Messages stays at the original root origin on port 8443. Phone installs separately from the same trusted host at port 8444, path `/phone/`. Approve the app, installation, device list and operations on Android. Ports are separate web origins; access credentials, push subscriptions and caches are scoped separately. Pair additional Android phones to the host and explicitly grant data capabilities per source. Only verified voice gateways may originate calls; no PBX or Cloudflare changes take place automatically.
 
 Build the two web entries before the APK. The isolated Android instrumentation build is opt-in via `-PcommLinkFixture` and uses a distinct debug application ID. Database fixtures, browser mocks and ARI simulations validate code paths, not carrier delivery or two-way media. Production acceptance requires actual SIM selection, iPhone Home Screen installs, system contacts, CallKit, RTP and a handoff that retains the original external leg. See [directory sync](COMMLINK-DIRECTORY.md) and [voice setup and validation](VOICE.en.md).
+
+### Authorized deployment on 2026-11-02
+
+The connected Redmi now runs signed 0.9.0-dev2 (25), retaining the original package/data. Asterisk web voice modules are enabled; ARI remains loopback-only. Phone exposes an authenticated, same-origin SIP WebSocket proxy with bounded frames/queues and live revocation. Existing gateway 2001 and Groundwire 1001 are reused, retaining incoming routes. SIP registration/cleanup and real Android TLS/WS checks passed without automatically originating external calls. Temporary test apps/sessions were removed; 152 JVM tests passed.
+
+Carrier calls, two-way media, CallKit, handoff, contacts writeback and cross-network media remain unverified. TURN is not configured. The app data snapshot was taken after the first upgrade and is not a verified pre-migration rollback. PBX configuration is site-specific and is not created automatically by installing the APK.

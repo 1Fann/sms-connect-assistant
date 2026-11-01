@@ -111,6 +111,22 @@ class IphoneService : Service() {
                 }
             }
         }
+        if(intent?.action=="me.capcom.smsgateway.iphone.PROVISION_VOICE") scope.launch {
+            val file=java.io.File(noBackupFilesDir,"commlink-voice-import.json")
+            try {
+                require(file.length() in 2..65536)
+                val b=org.json.JSONObject(file.readText())
+                val host=prefs.getString("host","")!!
+                me.capcom.smsgateway.modules.voice.VoiceConfiguration(this@IphoneService).save(
+                    true,b.getInt("port"),b.getString("ariUser"),b.getString("ariPassword"),
+                    "wss://"+host+":8444/ws",host,b.getString("webUser"),b.getString("webPassword"),
+                    b.getString("nativeUser"),b.getString("nativePassword"),b.getString("bindings"),b.optString("ice"),b.getString("dialRules"))
+                me.capcom.smsgateway.modules.voice.VoiceRuntime.get(this@IphoneService).reconfigure()
+                java.io.File(noBackupFilesDir,"commlink-voice-import-result").writeText("ok")
+            }catch(_:Exception) {
+                java.io.File(noBackupFilesDir,"commlink-voice-import-result").writeText("failed")
+            }finally {file.delete()}
+        }
         if(intent?.action == ACTION_CHECK) scope.launch { BridgeMonitor.check(this@IphoneService,true) }
         return START_STICKY
     }

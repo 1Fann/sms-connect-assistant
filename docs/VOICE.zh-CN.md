@@ -4,12 +4,16 @@
 
 CommLink 通过独立的本机 Asterisk ARI 控制器保有外线，在网页和 Groundwire 之间切换用户端。SIP.js 在 iPhone 前台注册并建立 WebRTC 会话。语音默认关闭，短信、联系人和记录功能可以独立使用。代码和本地测试不能证明运营商接通、CallKit 锁屏来电或真实双向音频。
 
-本次只读检测到主节点运行 Asterisk 20.6.0 的发行版构建，3 个 PJSIP 端点和 3 个 UDP transport。res_rtp_asterisk 已加载；res_ari、res_ari_channels、res_stasis、res_http_websocket、res_pjsip_transport_websocket 未加载。AMI 和 ICE support 显示关闭，HTTP 状态未报告启用的监听。实际 NAT 穿透、转发策略、有效公网 WSS、TURN 和授权账号需要管理员验证。没有读取或导出 PBX 密码，没有更改现网账号、拨号计划或呼叫。
+部署前的只读检测曾发现主节点运行 Asterisk 20.6.0 的发行版构建，3 个 PJSIP 端点和 3 个 UDP transport。res_rtp_asterisk 已加载；res_ari、res_ari_channels、res_stasis、res_http_websocket、res_pjsip_transport_websocket 未加载。AMI 和 ICE support 显示关闭，HTTP 状态未报告启用的监听。实际 NAT 穿透、转发策略、有效公网 WSS、TURN 和授权账号需要管理员验证。没有读取或导出 PBX 密码，没有更改现网账号、拨号计划或呼叫。
 
 **为什么没有启用网页语音。** 主机已安装 WebSocket 传输、ARI、Stasis、SRTP 和加密模块文件。现有 Asterisk 助手的 fresh-config.py 生成精简的 modules.conf，使用 autoload=no，只显式加载传统 SIP/RTP 等所需模块。网页语音相关模块运行时加载数为 0。HTTP 服务被关闭，ARI 配置段虽为 enabled=yes，实际没有提供可用接口。现有证据不要求重装 PBX，也不足以证明打开全部模块就能通话。请先在隔离环境验证依赖、受限路由、WSS 证书和媒体，再决定生产变更。AMI 不是本实现的必需条件。
 
 
 主节点安装的本地网关包版本显示 0.3.5-custom.5。相邻 voice-sip-dualsim 工程的 Gradle 版本为 0.3.5-custom.3，文档和运行包不能替代匹配版本的真机验收。已核实其源代码中两条 SIP 实现接受下行 INVITE 的 X-VSA-Dial 和 X-VSA-SIM，后者接受 1 或 2，并在蜂窝端重新解析当前卡槽与 PhoneAccount。没有把 X-VSA-SIMSLOT 或未验证的返回头用于选卡。该适配一次仅允许一条设备外线，超过两槽的此版本网关不开放语音。通用设备注册仍可发现更多 SMS 线路。
+
+## 2026-11-02 部署更新
+
+用户随后授权部署，主节点现已运行 0.9.0-dev2，网页语音模块已启用。上面的缺模块状态是部署前记录。ARI 仅在回环监听，电话 HTTPS 8444 的 /ws 提供受安装授权和 Origin 检查保护的 SIP 代理。复用既有网关与 Groundwire，原蜂窝呼入路线保留。注册、注销及真实 TLS 代理授权检查通过；真实外线、音频和接续仍待验收。详见[部署记录](COMMLINK-UPGRADE.md)。
 
 ## 接入条件
 

@@ -5,6 +5,10 @@ import org.junit.Test
 
 class VoiceSafetyTest {
     private val line=VoiceLine("line-a","device-a",1,true,9)
+    @Test fun existingNumericPjsipEndpointsAreSafeBindings(){
+        for(value in listOf("2001","cl-web","cl-native"))assertTrue(validEndpoint(value))
+        for(value in listOf("", "2001/other", "2001@host", "2001\ncontext=evil", ";2001"))assertFalse(validEndpoint(value))
+    }
     @Test fun rejectsSimReplacementAndCrossDevice(){
         assertTrue(VoicePolicy.matchesBinding(line,line))
         for(changed in listOf(line.copy(id="other"),line.copy(deviceId="peer"),line.copy(slot=2),

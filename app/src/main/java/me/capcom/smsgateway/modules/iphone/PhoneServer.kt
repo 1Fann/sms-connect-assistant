@@ -12,6 +12,9 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.util.AttributeKey
+import io.ktor.server.websocket.*
+import io.ktor.websocket.*
+import kotlinx.coroutines.*
 import java.security.KeyStore
 import me.capcom.smsgateway.modules.directory.*
 import me.capcom.smsgateway.modules.voice.*
@@ -58,6 +61,7 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
             val server=embeddedServer(Netty, applicationEngineEnvironment {
                 sslConnector(keys,alias,{password},{password}) { this.host=bindAddress; this.port=this@PhoneServer.port }
                 module {
+                    install(WebSockets) { maxFrameSize=65536 }
                     install(ContentNegotiation) { gson() }
                     install(StatusPages) {
                         exception<IllegalArgumentException> { call,_->call.respond(HttpStatusCode.BadRequest,mapOf("error" to "请求字段或当前操作无效")) }
@@ -91,6 +95,18 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
                         }
                     }
                     routing {
+                        webSocket("/ws","sip") {
+                            val grant=store.install(call.request.cookies["__Host-phone"].orEmpty(),"phone")
+                            val origin=call.request.header("Origin")
+                            if(grant?.allows("calls.dial")!=true || origin!="https://"+host+":"+port){
+                                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY,"Not authorized"));return@webSocket
+                            }
+                            val cfg=VoiceConfiguration(androidContext)
+                            if(!cfg.enabled){close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER,"Not ready"));return@webSocket}
+                            proxySip(this,cfg.ariPort) {
+                                store.install(call.request.cookies["__Host-phone"].orEmpty(),"phone")?.allows("calls.dial")==true && VoiceConfiguration(androidContext).enabled
+                            }
+                        }
                         post("/api/pair") {
                             if(!pairLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests)
                             val input=call.json()
@@ -168,6 +184,42 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
         }.onFailure {
             runCatching { stop() }
             status="电话服务启动失败，请检查端口与证书"
+        }
+    }
+    private suspend fun proxySip(front:DefaultWebSocketServerSession,localPort:Int,authorized:()->Boolean) = coroutineScope {
+        val ended=kotlinx.coroutines.CompletableDeferred<Unit>()
+        val frames=kotlinx.coroutines.channels.Channel<String>(32)
+        val connection=okhttp3.OkHttpClient.Builder().proxy(java.net.Proxy.NO_PROXY)
+            .followRedirects(false).pingInterval(20,java.util.concurrent.TimeUnit.SECONDS).build()
+        val back=connection.newWebSocket(okhttp3.Request.Builder().url("ws://127.0.0.1:"+localPort+"/ws")
+            .header("Sec-WebSocket-Protocol","sip").build(),object:okhttp3.WebSocketListener(){
+            override fun onOpen(ws:okhttp3.WebSocket,response:okhttp3.Response){
+                if(response.header("Sec-WebSocket-Protocol")!="sip"){ws.cancel();ended.complete(Unit)}
+            }
+            override fun onMessage(ws:okhttp3.WebSocket,text:String){
+                if(text.length>65536 || !frames.trySend(text).isSuccess){ws.cancel();ended.complete(Unit)}
+            }
+            override fun onClosing(ws:okhttp3.WebSocket,code:Int,reason:String){ws.close(code,null);ended.complete(Unit)}
+            override fun onFailure(ws:okhttp3.WebSocket,t:Throwable,response:okhttp3.Response?){ended.complete(Unit)}
+        })
+        val downstream=launch{for(text in frames)front.send(Frame.Text(text))}
+        val upstream=launch{
+            try {
+                for(frame in front.incoming) {
+                    if(frame is Frame.Text){
+                        val text=frame.readText()
+                        if(text.length>65536 || !back.send(text))break
+                    } else if(frame is Frame.Binary)break
+                }
+            }finally{ended.complete(Unit)}
+        }
+        val authorization=launch {
+            while(isActive){delay(2000);if(!authorized()){ended.complete(Unit);break}}
+        }
+        try{ended.await()}finally{
+            authorization.cancel();upstream.cancel();downstream.cancel();frames.close();back.cancel()
+            connection.dispatcher.executorService.shutdown()
+            runCatching {front.close()}
         }
     }
     private suspend fun asset(call:ApplicationCall,path:String) {

@@ -9,7 +9,7 @@ import java.util.UUID
 data class VoiceLine(val id:String, val deviceId:String, val slot:Int, val online:Boolean, val subscriptionId:Int?=null)
 data class GatewayBinding(val device:String,val endpoint:String,val incomingLine:String?)
 
-internal fun validEndpoint(value:String) = value.matches(Regex("[A-Za-z][A-Za-z0-9_-]{1,62}"))
+internal fun validEndpoint(value:String) = value.matches(Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,62}"))
 
 /** Separate credentials and mappings from SMS preferences. No PBX configuration is applied by this class. */
 class VoiceConfiguration(context:Context,preferencesName:String="commlink-voice") {

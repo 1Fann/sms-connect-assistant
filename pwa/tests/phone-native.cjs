@@ -31,6 +31,10 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
   return route.fulfill({contentType:'application/json',body:JSON.stringify(data[key])});
  });
  await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
+ await page.getByRole('button',{name:'拨打',exact:true}).waitFor();
+ assert.equal(await page.locator('nav [aria-current=page]').innerText(),'拨号键盘');
+ await page.screenshot({path:path.join(out,'home-keypad.png')});
+ await page.locator('nav button').filter({hasText:'通话'}).click();
  await page.getByRole('button',{name:'筛选通话'}).waitFor();
  const callRows=page.locator('.call-row-main');
  assert.ok((await callRows.nth(0).textContent()).includes('主机 · SIM 2 · 呼出'),await callRows.nth(0).textContent());
@@ -51,8 +55,8 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.mouse.move(box.x+290,box.y+30);await page.mouse.down();await page.mouse.move(box.x+135,box.y+30,{steps:14});await page.mouse.up();await page.waitForTimeout(350);
  await page.screenshot({path:path.join(out,'swipe.png')});
  await page.getByRole('button',{name:'移除此通话记录',exact:true}).first().click();await page.waitForTimeout(300);assert.equal(await page.locator('.call-row-main').count(),14);
- installation='other-install';await page.reload();await page.locator('.call-row-main').first().waitFor();assert.equal(await page.locator('.call-row-main').count(),15);
- installation='native-fixture';await page.reload();await page.locator('.call-row-main').first().waitFor();assert.equal(await page.locator('.call-row-main').count(),14);
+ installation='other-install';await page.reload();await page.locator('nav button').filter({hasText:'通话'}).click();await page.locator('.call-row-main').first().waitFor();assert.equal(await page.locator('.call-row-main').count(),15);
+ installation='native-fixture';await page.reload();await page.locator('nav button').filter({hasText:'通话'}).click();await page.locator('.call-row-main').first().waitFor();assert.equal(await page.locator('.call-row-main').count(),14);
  await page.getByRole('button',{name:'筛选通话'}).click();await page.getByRole('menuitem',{name:'最近移除',exact:true}).click();
  assert.equal(await page.locator('.call-row-main').count(),1);
  await page.getByRole('button',{name:'编辑',exact:true}).click();await page.getByRole('button',{name:'选择记录',exact:true}).click();await page.getByRole('button',{name:'恢复',exact:true}).click();
@@ -76,11 +80,31 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.setViewportSize({width:320,height:568});await page.screenshot({path:path.join(out,'keypad-small.png')});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Horizontal overflow');
  const dialBounds=await page.getByRole('button',{name:'拨打',exact:true}).boundingBox(),dockBounds=await page.locator('.phone-dock').boundingBox();assert.ok(dialBounds.y+dialBounds.height<dockBounds.y,'Dial button covered by dock');
+ assert.equal(Math.round(568-dockBounds.y-dockBounds.height),6,'Compact dock must sit 6px from the viewport bottom');
+ assert.ok(await page.locator('#phone-app').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Compact dialer must not scroll');
+ await page.setViewportSize({width:390,height:844});
+ const normalDock=await page.locator('.phone-dock').boundingBox();
+ assert.equal(Math.round(844-normalDock.y-normalDock.height),6,'Normal dock must sit lower too');
+ assert.ok(await page.locator('#phone-app').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Normal dialer must not scroll');
+ const cssPath=await page.locator('link[rel=stylesheet]').getAttribute('href');
+ const safeStyle=await page.addStyleTag({content:fs.readFileSync(path.join(root,cssPath),'utf8').replaceAll('env(safe-area-inset-bottom)','34px').replaceAll('env(safe-area-inset-top)','59px')});
+ await page.waitForTimeout(220);
+ const safeDock=await page.locator('.phone-dock').boundingBox(),safeDial=await page.getByRole('button',{name:'拨打',exact:true}).boundingBox();
+ assert.equal(Math.round(844-safeDock.y-safeDock.height),22,'Home-indicator dock keeps 22px clearance');
+ assert.ok(safeDial.y+safeDial.height<safeDock.y,'Safe-area dial button must remain above dock');
+ const safeLayout=await page.locator('#phone-app').evaluate(el=>({client:el.clientHeight,scroll:el.scrollHeight,children:[...el.querySelectorAll('.dialer-screen,.dial-top,.dial-number-area,.keypad,.dialrow,.dial-options')].map(c=>({class:c.className,height:c.getBoundingClientRect().height,top:c.getBoundingClientRect().top}))}));
+ assert.ok(safeLayout.scroll<=safeLayout.client+1,'Notched iPhone dialer must not scroll '+JSON.stringify(safeLayout));
+ await page.screenshot({path:path.join(out,'keypad-safe-area.png')});
+ await safeStyle.evaluate(el=>el.remove());
+
  await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'light'});
  await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByLabel('搜索通话或联系人').fill('演示联系人');await page.screenshot({path:path.join(out,'search.png')});
  await page.getByRole('button',{name:'取消搜索'}).click();await page.locator('nav button').filter({hasText:'联系人'}).click();await page.getByRole('button',{name:'演示联系人',exact:true}).waitFor();
  await page.screenshot({path:path.join(out,'contacts.png')});
+ await page.goto('http://127.0.0.1:'+server.address().port+'/phone/#missed');
+ await page.getByRole('button',{name:'筛选通话'}).waitFor();
+ assert.equal(await page.locator('.call-row-main').count(),4,'Notification deep link must still show missed calls');
  assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
- console.log('PASS call list/detail recorded SIMs and unknown slots, Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
+ console.log('PASS keypad home and missed-call deep link, lower dock without dialer overflow, call list/detail recorded SIMs and unknown slots, Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

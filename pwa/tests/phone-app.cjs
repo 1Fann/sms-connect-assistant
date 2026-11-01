@@ -29,6 +29,7 @@ const server=http.createServer((req,res)=>{
    return route.fulfill({contentType:'application/json',body:JSON.stringify(data[endpoint]||{id:'demo'})});
  });
  await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
+ await page.locator('nav button').filter({hasText:'通话'}).click();
  await page.getByRole('button',{name:'合成联系人',exact:false}).first().click();
  await page.getByRole('button',{name:'拨打此号码'}).click();
  assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),'5550100');

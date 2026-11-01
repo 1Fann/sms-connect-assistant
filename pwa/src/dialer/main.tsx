@@ -19,7 +19,7 @@ function App(){
  useEffect(()=>{const viewport=window.visualViewport;const update=()=>{const gap=viewport&&Math.abs(viewport.scale-1)<.01?Math.max(0,innerHeight-viewport.height-viewport.offsetTop):0;document.documentElement.style.setProperty('--phone-keyboard',gap>60?gap+'px':'0px')};viewport?.addEventListener('resize',update);viewport?.addEventListener('scroll',update);update();return()=>{viewport?.removeEventListener('resize',update);viewport?.removeEventListener('scroll',update)}},[]);
  const [searching,setSearching]=useState(false),[query,setQuery]=useState('');
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
- const [tab,setTab]=useState('最近通话'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');
+ const [tab,setTab]=useState(()=>location.hash==='#missed'?'最近通话':'拨号键盘'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');
  const [lineHint,hint]=useState({id:'',seq:0}),[order,setOrder]=useState<string[]>(()=>{try{const v=JSON.parse(localStorage.getItem('phone.order')||'[]');return Array.isArray(v)?v:[]}catch{return []}});
  async function boot(){try{setSession(await api<Session>('session'));setMessage('')}catch(e){if(!(e instanceof PhoneError&&e.status===401))setMessage(err(e));setSession(null)}finally{setLoading(false)}}
  useEffect(()=>{void boot()},[]);

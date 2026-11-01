@@ -19,6 +19,7 @@ import {groupConversations,messageTime,optimisticConversation,reuseRecords} from
 import {useListMotion} from './listMotion';
 import {useNavigation} from './navigation';
 import {useContextMotion} from './contextMotion';
+import {useMessageMenu,type MessageMenuTrigger} from './messageMenu';
 import {useViewport} from './viewport';
 
 const EMPTY:Sms[]=[];
@@ -51,15 +52,33 @@ function App(){
   if(optimistic){if(action==='pin'||action==='unpin')captureList();metadataRef.current=optimistic;setConversationStates(optimistic)}
   try{const result=await api<ConversationState[]>('conversations',{address,action,region});metadataRef.current=result;setConversationStates(prev=>reuseRecords(prev,result));setMetadataReady(true)}catch(e){if(optimistic){if(action==='pin'||action==='unpin')captureList();const restored=[...metadataRef.current.filter(s=>s.address!==address),...before.filter(s=>s.address===address)];metadataRef.current=restored;setConversationStates(restored)}throw e}finally{metadataWrites.current--;generation.current++;release()}
  }
- async function subscribe(){
+ const [preview,setPreview]=useState<boolean|null>(null),[pushBusy,setPushBusy]=useState(false);
+ useEffect(()=>{
+  if(screen!=='settings'||!paired)return;
+  let active=true;
+  setPreview(null);
+  api<{enabled:boolean}>('push/preview').then(r=>{if(active)setPreview(r.enabled)}).catch(e=>{if(active)fail(e)});
+  return ()=>{active=false};
+ },[screen,paired]);
+ async function disablePreview(){
+  setPushBusy(true);
+  try{await api('push/preview/off',{});setPreview(false);setPushStatus('已关闭短信预览')}
+  catch(e){fail(e)}finally{setPushBusy(false)}
+ }
+ async function subscribe(wantPreview=preview===true){
+  if(pushBusy)return;
+  setPushBusy(true);
   try{
    if(!('PushManager' in window)||!('Notification' in window))throw Error('请在 iOS 16.4 及以上将网页添加到主屏幕后开启');
    const permission=await Notification.requestPermission();if(permission!=='granted'){setPushStatus('系统未授权');return}
    const {key}=await api<{key:string}>('push/key');const decoded=atob(key.replace(/-/g,'+').replace(/_/g,'/'));const bytes=Uint8Array.from(decoded,c=>c.charCodeAt(0));
    const registration=await navigator.serviceWorker.ready;
    const subscription=await registration.pushManager.getSubscription()||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});
-   await api('push/subscribe',{endpoint:subscription.endpoint});setPushStatus('已订阅；请发送测试通知并在设备确认');
-  }catch(e){setPushStatus('推送订阅失败');fail(e)}
+   const keys=wantPreview?subscription.toJSON().keys:undefined;
+   if(wantPreview&&(!keys?.p256dh||!keys.auth))throw Error('设备未提供通知加密密钥，请重新订阅');
+   await api('push/subscribe',{endpoint:subscription.endpoint,preview:wantPreview,...keys});
+   setPreview(wantPreview);setPushStatus('已订阅；请发送测试通知并在设备确认');
+  }catch(e){setPushStatus('推送订阅失败');fail(e)}finally{setPushBusy(false)}
  }
  useEffect(()=>{if(screen!=='new'||!paired)return;let cancelled=false;const t=setTimeout(()=>api<{name:string,number:string}[]>('contacts?q='+encodeURIComponent(recipient)).then(r=>{if(!cancelled)setContacts(r)}).catch(()=>{}),250);return()=>{cancelled=true;clearTimeout(t)}},[recipient,screen,paired]);
  const end=useRef<HTMLDivElement>(null),loading=useRef(false),sending=useRef(false),outRef=useRef(outgoing); outRef.current=outgoing;
@@ -109,6 +128,23 @@ function App(){
  const current=active?(conversations.get(active)||EMPTY):EMPTY;
  const title=current.find(m=>m.name)?.name||formatPhone(active||'',region);
  async function openConversation(address:string){const latest=[...(conversations.get(address)||[])].reverse().find(m=>m.incoming);if(latest)setSim(String(latest.sim||''));setActive(address);setScreen('chat');setError('');const time=Date.now();setRows(prev=>prev.map(m=>keyOf(m.address)===address?{...m,read:true}:m));try{await api('read',{address:rows.find(m=>keyOf(m.address)===address)?.address||address,time:String(time)});if(meta.get(address)?.unread)await changeConversation(address,'read')}catch(e){fail(e)}}
+ // Fragments never travel to the server. Clear the sender from browser history after reading it.
+ const [notificationAddress,setNotificationAddress]=useState<string|null>(null);
+ useEffect(()=>{
+  const readTarget=()=>{
+   const sender=new URLSearchParams(location.hash.slice(1)).get('conversation');
+   if(!sender)return;
+   history.replaceState(history.state,'',location.pathname+location.search);
+   if(sender.length<=100)setNotificationAddress(sender);
+  };
+  readTarget();window.addEventListener('hashchange',readTarget);
+  return ()=>window.removeEventListener('hashchange',readTarget);
+ },[]);
+ useEffect(()=>{
+  if(!paired||!metadataReady||!notificationAddress)return;
+  setNotificationAddress(null); setDraft(''); setSheet(false);setDetails(null);
+  void openConversation(keyOf(notificationAddress));
+ },[notificationAddress,paired,metadataReady]);
  async function saveName(kind:'phones'|'sims',id:string,name:string):Promise<string>{
   await api(kind,{id,name});
   const [devices,lines]=await Promise.all([api<Phone[]>('phones'),api<SimLine[]>('sims')]);
@@ -135,7 +171,10 @@ function App(){
  const [filter,setFilter]=useState<'all'|'unread'|'deleted'>('all'),[menu,setMenu]=useState(false),[editing,setEditing]=useState(false);
  const requestPinEdit=useRef(false);
  const [editMenu,setEditMenu]=useState(false),[pinEditing,setPinEditing]=useState(false);
- const [messageMenu,setMessageMenu]=useState<Sms|null>(null),[messageError,setMessageError]=useState(''),[notice,setNotice]=useState('');
+ const [menuSelection,setMessageMenu]=useState<{message:Sms,trigger:MessageMenuTrigger}|null>(null);
+ const messageMenu=menuSelection?.message;
+ const [messageError,setMessageError]=useState(''),[notice,setNotice]=useState('');
+ const messageAnchor=useRef<DOMRect|null>(null),messageSourceRef=useRef<HTMLElement|null>(null);
  const messageDialog=useRef<HTMLDialogElement>(null),lastMessage=useRef<Sms|null>(null);if(messageMenu)lastMessage.current=messageMenu;
  const [swiped,setSwiped]=useState<string|null>(null),[contextKey,setContextKey]=useState<string|null>(null),[deleteKeys,setDeleteKeys]=useState<string[]>([]);
  const actionDialog=useRef<HTMLDialogElement>(null),deleteDialog=useRef<HTMLDialogElement>(null);
@@ -158,7 +197,7 @@ function App(){
  useLayoutEffect(()=>{const el=chatView.current;if(!el)return;if(thread.current!==active||nearBottom.current)el.scrollTop=el.scrollHeight;thread.current=active},[active,current.length,screen]);
  useLayoutEffect(()=>{const anchor=pendingAnchor.current;if(anchor?.el.isConnected)anchor.el.scrollTop=anchor.top+anchor.el.scrollHeight-anchor.height;pendingAnchor.current=null},[rows]);
  useEffect(()=>{if(!notice)return;const t=setTimeout(()=>setNotice(''),1800);return()=>clearTimeout(t)},[notice]);
- const messageMotion=useDialogMotion(!!messageMenu,messageDialog,()=>setMessageMenu(null));
+ const messageMotion=useMessageMenu(menuSelection?.trigger??null,messageDialog,messageAnchor,messageSourceRef,()=>setMessageMenu(null));
  const optionsMotion=useDialogMotion(sheet,dialog,()=>setSheet(false),true);
  const contextMotion=useContextMotion(!!contextKey,actionDialog,contextAnchor,()=>setContextKey(null));
  const deleteMotion=useDialogMotion(!!deleteKeys.length,deleteDialog,()=>{if(!busy)setDeleteKeys([])},true);
@@ -226,12 +265,11 @@ function App(){
    {screen==='new'&&contacts.map(c=><button className="contact-suggestion" key={c.number+c.name} onClick={()=>setRecipient(c.number)}><Avatar name={c.name}/><span>{c.name}<small>{formatPhone(c.number,region)}</small></span></button>)}
    {cursor&&screen==='chat'&&<button className="load-more" onClick={()=>{nearBottom.current=false;void refresh(true)}}>加载更早的短信</button>}
    {screen==='chat'&&<p className="sms-heading">短信 · SMS</p>}
-   {current.map((m,i)=>{const tail=groupEnd(m,current[i+1]),stamp=showDate(m,current[i-1]);return <React.Fragment key={m.id}>
+   {current.map((m,i)=>{const tail=groupEnd(m,current[i+1]),stamp=showDate(m,current[i-1]);const expanded=details===m.id,deliveryShown=!m.incoming&&(i===lastOutgoing||['failed','unknown','accepted','local'].includes(m.state));return <React.Fragment key={m.id}>
     {stamp&&<time className="date-divider" dateTime={new Date(m.date).toISOString()}>{sectionTime(m.date)}</time>}
     <article className={(m.incoming?'incoming':'outgoing')+(tail?' group-end':'')+(i>0&&m.incoming!==current[i-1].incoming?' new-sender':'')}>
-     <small className="message-line">{messageSource(m)}</small><MessageBubble body={m.body} tail={tail} expanded={details===m.id} onDetails={()=>setDetails(details===m.id?null:m.id)} onMenu={()=>{setMessageError('');setMessageMenu(m)}}/><time className="drag-time" aria-hidden="true">{messageTime(m.date)}</time>
-     {details===m.id&&<small className="message-details">{sectionTime(m.date)} · {sims.find(s=>s.id===m.sim)?.name||'线路未知'}{!m.incoming?' · '+stateLabel[m.state]:''}</small>}
-     {!m.incoming&&(i===lastOutgoing||['failed','unknown','accepted','local'].includes(m.state))&&<small className={'delivery '+(m.state==='failed'?'failed':'')}>{stateLabel[m.state]}{m.error&&<> · {m.error}</>}</small>}
+     <small className={'message-line'+(expanded?' message-details':'')}>{messageSource(m)}{expanded&&!stamp&&<span className="message-detail-time"> · {messageTime(m.date)}</span>}{expanded&&!m.incoming&&!deliveryShown&&<> · {stateLabel[m.state]}</>}</small><MessageBubble body={m.body} tail={tail} expanded={details===m.id} onDetails={()=>setDetails(details===m.id?null:m.id)} onMenu={(anchor,source,trigger)=>{messageAnchor.current=anchor;messageSourceRef.current=source;setMessageError('');setMessageMenu({message:m,trigger})}}/><time className="drag-time" aria-hidden="true">{messageTime(m.date)}</time>
+     {deliveryShown&&<small className={'delivery '+(m.state==='failed'?'failed':'')}>{stateLabel[m.state]}{m.error&&<> · {m.error}</>}</small>}
      {!m.incoming&&m.state==='unknown'&&outgoing.some(o=>o.id===m.id)&&<button className="retry" disabled={busy} onClick={()=>void send(m)}>核对 / 重试同一请求</button>}
      {!m.incoming&&m.state==='failed'&&<button className="retry" onClick={()=>{setDraft(m.body);setError('短信可能已有部分送出，请确认后再发送')}}>编辑后重发</button>}
     </article></React.Fragment>})}
@@ -243,15 +281,16 @@ function App(){
   </form>
  </div>}
  {screen==='settings'&&<header className="settings-header"><button className="glass circle" aria-label="返回信息列表" onClick={back}><Icon name="back"/></button><strong>设置</strong><span className="header-spacer"/></header>}
- {screen==='settings'&&<section className="settings"><h1>短信互联助手</h1><div className="card"><h3>号码显示</h3><label>本地号码地区<select value={region} onChange={e=>{setRegion(e.target.value as CountryCode);localStorage.setItem('sms.region',e.target.value)}}>{getCountries().map(r=><option value={r} key={r}>{new Intl.DisplayNames(['zh-CN'],{type:'region'}).of(r)} ({r})</option>)}</select></label><p>国际号码按国家码分段；没有国家码时使用此地区。号码库随应用离线提供。</p></div><div className="card"><h3>手机与 SIM 名称</h3><p>名称最多 30 个字符，清空后保存可恢复默认名称。改名不改变实际发送手机或 SIM 卡。</p>{phones.map(p=><div className="phone-names" key={p.id}><NameEditor label={(p.id==='server'?'服务器手机':'共享手机')+'名称'} value={p.name} onSave={name=>saveName('phones',p.id,name)}/>{sims.filter(s=>s.phoneId===p.id).map(s=><NameEditor key={s.id} label={p.name+' · SIM '+s.slot} value={s.simName} onSave={name=>saveName('sims',String(s.id),name)}/>)}</div>)}</div><div className="card"><h3>连接状态</h3><button onClick={()=>api('status').then(r=>setDiagnostic(JSON.stringify(r,null,2))).catch(fail)}>检查网关</button><pre>{diagnostic}</pre><p>无法连接时请检查证书、DDNS、路由器防火墙，以及 iPhone 当前网络是否支持 IPv6。浏览器无法单独确认是哪一项故障。</p></div><div className="card"><h3>通知</h3><p>默认只显示“收到一条新短信”，不会发送短信正文或完整号码。依赖 Apple 推送服务，可能延迟；点击通知打开会话列表。</p><p role="status">{pushStatus}</p><button onClick={()=>void subscribe()}>开启 / 重新订阅通知</button><button onClick={()=>api<{status:string}>('push/test',{}).then(r=>setPushStatus(r.status)).catch(fail)}>发送测试通知</button><button onClick={()=>api<{status:string}>('push/status').then(r=>setPushStatus(r.status)).catch(fail)}>查看提交结果</button><button onClick={()=>setPushStatus('用户已确认：此设备收到通知')}>我已收到通知</button><button onClick={async()=>{try{await api('push/unsubscribe',{});const r=await navigator.serviceWorker.ready;await(await r.pushManager.getSubscription())?.unsubscribe();setPushStatus('已关闭通知')}catch(e){fail(e)}}}>关闭通知</button></div><div className="card"><h3>隐私</h3><p>不持久保存短信正文或认证密钥。仅缓存界面资源；访问凭证 12 小时轮换，30 天未使用需重新配对。HTTPS 保护访问链路，普通短信不具备端到端加密。</p><button onClick={async()=>{await Promise.all((await caches.keys()).map(k=>caches.delete(k)));localStorage.removeItem('sms.region');setRows([]);setOutgoing([]);setError('本地缓存已清除')}}>清除本地缓存</button><button onClick={()=>api('logout',{}).then(()=>{setPaired(false);setRows([]);setOutgoing([])}).catch(fail)}>退出此设备</button></div></section>}
+ {screen==='settings'&&<section className="settings"><h1>短信互联助手</h1><div className="card"><h3>号码显示</h3><label>本地号码地区<select value={region} onChange={e=>{setRegion(e.target.value as CountryCode);localStorage.setItem('sms.region',e.target.value)}}>{getCountries().map(r=><option value={r} key={r}>{new Intl.DisplayNames(['zh-CN'],{type:'region'}).of(r)} ({r})</option>)}</select></label><p>国际号码按国家码分段；没有国家码时使用此地区。号码库随应用离线提供。</p></div><div className="card"><h3>手机与 SIM 名称</h3><p>名称最多 30 个字符，清空后保存可恢复默认名称。改名不改变实际发送手机或 SIM 卡。</p>{phones.map(p=><div className="phone-names" key={p.id}><NameEditor label={(p.id==='server'?'服务器手机':'共享手机')+'名称'} value={p.name} onSave={name=>saveName('phones',p.id,name)}/>{sims.filter(s=>s.phoneId===p.id).map(s=><NameEditor key={s.id} label={p.name+' · SIM '+s.slot} value={s.simName} onSave={name=>saveName('sims',String(s.id),name)}/>)}</div>)}</div><div className="card"><h3>连接状态</h3><button onClick={()=>api('status').then(r=>setDiagnostic(JSON.stringify(r,null,2))).catch(fail)}>检查网关</button><pre>{diagnostic}</pre><p>无法连接时请检查证书、DDNS、路由器防火墙，以及 iPhone 当前网络是否支持 IPv6。浏览器无法单独确认是哪一项故障。</p></div><div className="card"><h3>通知</h3><label><input type="checkbox" checked={preview===true} disabled={pushBusy||preview===null} onChange={e=>void (e.target.checked?subscribe(true):disablePreview())}/> 显示短信预览（本设备）</label><p>开启后，通知会显示联系人或号码及短信摘要。点按可打开会话。锁屏显示内容由 iPhone 的“显示预览”设置控制。</p><p role="status">{pushStatus}</p><button disabled={pushBusy||preview===null} onClick={()=>void subscribe()}>开启 / 重新订阅通知</button><button onClick={()=>api<{status:string}>('push/test',{}).then(r=>setPushStatus(r.status)).catch(fail)}>发送测试通知</button><button onClick={()=>api<{status:string}>('push/status').then(r=>setPushStatus(r.status)).catch(fail)}>查看提交结果</button><button onClick={()=>setPushStatus('用户已确认：此设备收到通知')}>我已收到通知</button><button disabled={pushBusy} onClick={async()=>{setPushBusy(true);try{await api('push/unsubscribe',{});setPreview(false);const r=await navigator.serviceWorker.ready;await(await r.pushManager.getSubscription())?.unsubscribe();setPushStatus('已关闭通知')}catch(e){fail(e)}finally{setPushBusy(false)}}}>关闭通知</button></div><div className="card"><h3>隐私</h3><p>不持久保存短信正文或认证密钥。仅缓存界面资源；访问凭证 12 小时轮换，30 天未使用需重新配对。HTTPS 保护访问链路，普通短信不具备端到端加密。</p><button onClick={async()=>{await Promise.all((await caches.keys()).map(k=>caches.delete(k)));localStorage.removeItem('sms.region');setRows([]);setOutgoing([]);setError('本地缓存已清除')}}>清除本地缓存</button><button onClick={()=>api('logout',{}).then(()=>{setPaired(false);setRows([]);setOutgoing([])}).catch(fail)}>退出此设备</button></div></section>}
 
  {notice&&<div className="toast glass" role="status">{notice}</div>}
- <dialog ref={messageDialog} className="conversation-menu message-menu" aria-label="信息操作" {...messageMotion}>
-  <div className="context-preview"><p>{(messageMenu||lastMessage.current)?.body}</p></div>
+ <dialog ref={messageDialog} className="native-context message-context" data-outgoing={(messageMenu||lastMessage.current)?.incoming===false} aria-label="信息操作" {...messageMotion}>
+  <div className={'message-preview '+((messageMenu||lastMessage.current)?.incoming?'incoming':'outgoing')}><p className={'bubble'+(messageSourceRef.current?.classList.contains('tail')?' tail':'')}>{(messageMenu||lastMessage.current)?.body}</p></div>
+  <div className="context-actions">
   <button onClick={()=>{const body=messageMenu?.body;if(body===undefined)return;if(!navigator.clipboard){setMessageError('无法访问剪贴板，请选择下面的文字拷贝');return}navigator.clipboard.writeText(body).then(()=>{setMessageMenu(null);setNotice('已拷贝')}).catch(()=>setMessageError('无法拷贝，请选择下面的文字拷贝'))}}>拷贝<Icon name="copy"/></button>
   <button onClick={()=>{const m=messageMenu;if(!m)return;setMessageMenu(null);newMessage();setDraft(m.body)}}>转发<Icon name="forward"/></button>
   {messageError&&<><p className="dialog-error">{messageError}</p><textarea className="copy-fallback" aria-label="选择信息文本" readOnly value={messageMenu?.body||''} onFocus={e=>e.currentTarget.select()}/></>}
-  <button className="context-cancel" onClick={()=>setMessageMenu(null)}>取消</button>
+  </div>
  </dialog>
  <dialog ref={actionDialog} className="native-context" aria-label="对话操作" {...contextMotion}>
   <button className="conversation-preview" aria-label={'打开'+contextName+'的对话'} onClick={()=>{const key=contextKey;if(!key||filter==='deleted')return;setContextKey(null);nearBottom.current=true;void openConversation(key)}}>

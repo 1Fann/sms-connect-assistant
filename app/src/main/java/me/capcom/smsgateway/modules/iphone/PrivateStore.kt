@@ -7,7 +7,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Only hashes and metadata are stored here, never SMS bodies or raw session keys. */
-class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", null, 6) {
+class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", null, 7) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE sessions (hash TEXT PRIMARY KEY, name TEXT NOT NULL, expires INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE requests (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, created INTEGER NOT NULL, generation INTEGER NOT NULL DEFAULT 1, rejected INTEGER NOT NULL DEFAULT 0)")
@@ -16,6 +16,7 @@ class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", nu
         db.execSQL("CREATE TABLE subscriptions (endpoint TEXT PRIMARY KEY, owner TEXT NOT NULL)")
         db.execSQL("CREATE TABLE refresh (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL)")
         createConversations(db)
+        addPreviewKeys(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
         if(old<6) {
@@ -26,6 +27,7 @@ class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", nu
         if(old<2) db.execSQL("CREATE TABLE subscriptions (endpoint TEXT PRIMARY KEY, owner TEXT NOT NULL)")
         if(old<3) db.execSQL("CREATE TABLE refresh (hash TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL)")
         if(old<4) createConversations(db)
+        if(old<7) addPreviewKeys(db)
         if(old==4) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN muted INTEGER NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE conversations ADD COLUMN region TEXT NOT NULL DEFAULT 'CN'")
@@ -75,12 +77,36 @@ class PrivateStore(context: Context) : SQLiteOpenHelper(context, "iphone.db", nu
             return result
         } finally { db.endTransaction() }
     }
-    fun subscribe(endpoint: String,token: String) {
-        require(WebPush.validEndpoint(endpoint))
-        writableDatabase.execSQL("DELETE FROM subscriptions WHERE owner=?",arrayOf(hash(token)))
-        writableDatabase.execSQL("INSERT OR REPLACE INTO subscriptions VALUES(?,?)",arrayOf(endpoint,hash(token)))
+    private fun addPreviewKeys(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE subscriptions ADD COLUMN public_key BLOB")
+        db.execSQL("ALTER TABLE subscriptions ADD COLUMN auth_key BLOB")
     }
-    fun subscriptions(): List<String> = readableDatabase.rawQuery("SELECT endpoint FROM subscriptions JOIN sessions ON owner=hash",null).use { c->buildList { while(c.moveToNext())add(c.getString(0)) } }
+    data class Subscription(val endpoint: String, val publicKey: ByteArray?, val auth: ByteArray?)
+    fun subscribe(endpoint: String, token: String, publicKey: ByteArray?, auth: ByteArray?) {
+        require(WebPush.validEndpoint(endpoint))
+        if(publicKey != null) PushEncryption.publicKey(publicKey)
+        require((publicKey == null && auth == null) || (publicKey != null && auth?.size == 16))
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            unsubscribe(token)
+            db.execSQL("INSERT OR REPLACE INTO subscriptions(endpoint,owner,public_key,auth_key) VALUES(?,?,?,?)",
+                arrayOf(endpoint,hash(token),publicKey,auth))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+    fun disablePreview(token: String) = writableDatabase.execSQL(
+        "UPDATE subscriptions SET public_key=NULL, auth_key=NULL WHERE owner=?", arrayOf(hash(token))
+    )
+    fun previewEnabled(token: String) = readableDatabase.rawQuery(
+        "SELECT 1 FROM subscriptions WHERE owner=? AND public_key IS NOT NULL", arrayOf(hash(token))
+    ).use { it.moveToFirst() }
+    fun subscriptions(): List<Subscription> = readableDatabase.rawQuery(
+        "SELECT endpoint,public_key,auth_key FROM subscriptions JOIN sessions ON owner=hash WHERE expires>? OR EXISTS(SELECT 1 FROM refresh WHERE refresh.owner=sessions.hash AND refresh.expires>?)",
+        Array(2) { System.currentTimeMillis().toString() }
+    ).use { c -> buildList {
+        while(c.moveToNext()) add(Subscription(c.getString(0), if(c.isNull(1)) null else c.getBlob(1), if(c.isNull(2)) null else c.getBlob(2)))
+    } }
     fun removeSubscription(endpoint: String) = writableDatabase.execSQL("DELETE FROM subscriptions WHERE endpoint=?",arrayOf(endpoint))
     fun unsubscribe(token: String) = writableDatabase.execSQL("DELETE FROM subscriptions WHERE owner=?",arrayOf(hash(token)))
     fun session(token: String): Boolean = readableDatabase.rawQuery(

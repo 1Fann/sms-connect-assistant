@@ -4,9 +4,9 @@
 
 让自己的 Android 手机作为短信终端，在 iPhone 的主屏幕网页应用中查看、接收和发送短信。单个 APK 内置 HTTPS 服务和网页，不需要电脑持续运行。
 
-**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.8.3**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
+**应用界面保留中文；本仓库提供中英双语文档。** 当前版本为 **0.8.8**，仍需更多机型和长期运行验证。基于 [capcom6/android-sms-gateway](https://github.com/capcom6/android-sms-gateway)，采用 Apache-2.0 许可证；本项目与 Apple、Google、小米及上游项目无隶属关系。
 
-0.8.3 加固发送防重复、双手机任务确认、共享短信推送和送达回执。0.8.2 新增双手机配对共享及手机 / SIM 自定义名称，默认按服务器手机和共享手机区分，不限制品牌。升级保留已有配对和短信记录。[双手机配置](docs/MULTI_PHONE.md) · [中英文更新说明](docs/releases/v0.8.3.md)。
+0.8.8 新增可选的加密短信通知预览，并改进会话中的信息详情与长按操作。0.8.3 加固发送防重复及双手机交接。升级保留已有配对和短信记录。[双手机配置](docs/MULTI_PHONE.md) · [中英文更新说明](docs/releases/v0.8.8.md)。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
@@ -24,7 +24,7 @@
 - 在已测试的 Redmi / MIUI 14 上，保持 MIUI 优化开启、设为默认短信应用并正确授权后，iPhone 发送不再要求 Android 逐条确认。其他 ROM 需要实测。
 - HTTPS 访问、Android 端配对确认、设备撤销、会话轮换及请求幂等处理。未知发送结果不会自动换新请求重发；“网关已接受”不等于实际送达。
 - Cloudflare DNS-01 证书签发与续期任务，也支持手动导入证书。现有 DDNS 由用户维护。
-- iOS 主屏幕 Web Push：通知不包含短信正文或完整号码；依赖 Apple 推送服务，不能保证准时送达。
+- iOS 主屏幕 Web Push：默认只显示新短信提醒。可按设备开启加密的发件人和正文预览，点按进入会话；依赖 Apple 推送服务，不能保证准时送达。
 - 可配置 1–1440 分钟检测间隔，默认 5 分钟，检查本机 HTTPS、证书、权限和 IPv6 解析。
 - 可选 Root 独立守护：每 1 秒轻量检查进程，异常时有限恢复；尊重手动关闭状态。普通收发不要求 Root。
 - 全球号码显示使用 Google libphonenumber / libphonenumber-js 的号码规则。它们不是 Apple 的私有格式接口，不能保证与所有 iOS 版本逐项一致。

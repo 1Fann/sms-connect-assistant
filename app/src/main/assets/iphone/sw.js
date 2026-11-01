@@ -1,5 +1,5 @@
 // App-shell only. Never cache authenticated requests, SMS bodies or credentials.
-const CACHE = 'sms-shell-v9';
+const CACHE = 'sms-shell-v10';
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(c => c.addAll(['/', '/manifest.webmanifest','/icon-192.png','/icon-512.png']))));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))));
 self.addEventListener('fetch', event => {
@@ -10,5 +10,29 @@ self.addEventListener('fetch', event => {
     return response;
   }).catch(()=>caches.match(event.request).then(r=>r || Response.error())));
 });
-self.addEventListener('push', event => event.waitUntil(self.registration.showNotification('短信互联助手', {body:'收到一条新短信',icon:'/icon-192.png',tag:'sms'})));
-self.addEventListener('notificationclick', event => {event.notification.close(); event.waitUntil(clients.openWindow('/'));});
+self.addEventListener('push', event => {
+  let payload;
+  try { payload = event.data?.json(); } catch { /* Older or invalid payload. */ }
+  const preview = typeof payload?.title === 'string' && typeof payload?.body === 'string';
+  const address = preview && typeof payload.address === 'string' ? payload.address.slice(0,100) : '';
+  event.waitUntil(self.registration.showNotification(preview ? payload.title : '短信互联助手', {
+    body: preview ? payload.body : '收到一条新短信',
+    icon: '/icon-192.png', tag: address ? 'sms-' + address : 'sms', data: {address}
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const address = event.notification.data?.address;
+  const path = address ? '/#conversation=' + encodeURIComponent(address) : '/';
+  event.waitUntil((async () => {
+    const windows = await clients.matchAll({type: 'window'});
+    const client = windows.find(w => new URL(w.url).pathname === '/');
+    if (client && address) {
+      try {
+        const target = await client.navigate(new URL(path, self.location.origin).href);
+        if (target) { await target.focus(); return; }
+      } catch { /* A closing window can disappear before navigation. */ }
+    }
+    await clients.openWindow(path);
+  })());
+});

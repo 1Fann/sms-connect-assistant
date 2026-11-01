@@ -22,13 +22,18 @@ class SecretVault(context: Context) {
     }
     @Synchronized fun put(name: String,value: ByteArray) {
         require(name.matches(Regex("[a-z-]+")))
+        val temp=File(directory,"$name.tmp");temp.writeBytes(seal(value));check(temp.renameTo(File(directory,"$name.secret")))
+    }
+    fun seal(value: ByteArray): ByteArray {
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
-        val temp=File(directory,"$name.tmp");temp.writeBytes(cipher.iv+cipher.doFinal(value));check(temp.renameTo(File(directory,"$name.secret")))
+        return cipher.iv+cipher.doFinal(value)
     }
     @Synchronized fun get(name: String): ByteArray? {
         require(name.matches(Regex("[a-z-]+")))
         val file=File(directory,"$name.secret");if(!file.exists())return null
-        val bytes=file.readBytes()
+        return open(file.readBytes())
+    }
+    fun open(bytes: ByteArray): ByteArray {
         return Cipher.getInstance("AES/GCM/NoPadding").run { init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,bytes.copyOfRange(0,12)));doFinal(bytes.copyOfRange(12,bytes.size)) }
     }
 }

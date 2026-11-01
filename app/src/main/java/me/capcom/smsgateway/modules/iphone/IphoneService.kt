@@ -198,7 +198,19 @@ class IphoneService : Service() {
                     post("/api/read") { val b=call.json(); store.markRead(PhoneIdentity.normalize(b["address"]!!), minOf(b["time"]!!.toLong(), System.currentTimeMillis())); call.respond(mapOf("ok" to true)) }
                     post("/api/logout") { store.logout(call.request.cookies["__Host-iphone"] ?: ""); call.response.header("Set-Cookie", "__Host-iphone=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"); call.respond(mapOf("ok" to true)) }
                     get("/api/push/key") { call.respond(mapOf("key" to WebPush(this@IphoneService).publicKey())) }
-                    post("/api/push/subscribe") { val b=call.json();store.subscribe(b["endpoint"]!!,call.request.cookies["__Host-iphone"]!!);call.respond(mapOf("ok" to true)) }
+                    post("/api/push/preview/off") {
+                        store.disablePreview(call.request.cookies["__Host-iphone"]!!)
+                        call.respond(mapOf("ok" to true))
+                    }
+                    get("/api/push/preview") { call.respond(mapOf("enabled" to store.previewEnabled(call.request.cookies["__Host-iphone"]!!))) }
+                    post("/api/push/subscribe") {
+                        val b = call.json()
+                        fun key(field: String) = if(b["preview"] == "true") android.util.Base64.decode(
+                            requireNotNull(b[field]), android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
+                        ) else null
+                        store.subscribe(requireNotNull(b["endpoint"]), call.request.cookies["__Host-iphone"]!!, key("p256dh"), key("auth"))
+                        call.respond(mapOf("ok" to true))
+                    }
                     post("/api/push/unsubscribe") { store.unsubscribe(call.request.cookies["__Host-iphone"]!!);call.respond(mapOf("ok" to true)) }
                     post("/api/push/test") { if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests);WebPushWorker.enqueueTest(this@IphoneService);call.respond(mapOf("status" to "已排队；不代表已提交或设备已收到")) }
                     get("/api/push/status") { call.respond(mapOf("status" to (prefs.getString("push-status",null) ?: "尚无提交结果"))) }

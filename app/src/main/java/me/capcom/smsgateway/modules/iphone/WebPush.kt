@@ -16,7 +16,7 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.*
 import java.util.concurrent.TimeUnit
 
-/** Payload-free Web Push: Apple receives no SMS content, number or conversation ID. */
+/** Legacy subscriptions receive empty pushes; previews use RFC 8291 encryption. */
 class WebPush(private val context: Context) {
     private val vault=SecretVault(context)
     private fun keys(): KeyPair = synchronized(KEY_LOCK) {
@@ -33,14 +33,20 @@ class WebPush(private val context: Context) {
         fun coordinate(n: java.math.BigInteger): ByteArray { val raw=n.toByteArray();return ByteArray(32).also { raw.copyInto(it,maxOf(0,32-raw.size),maxOf(0,raw.size-32)) } }
         return android.util.Base64.encodeToString(byteArrayOf(4)+coordinate(pub.w.affineX)+coordinate(pub.w.affineY),android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP)
     }
-    fun send(endpoint: String): Int {
+    fun send(subscription: PrivateStore.Subscription, preview: ByteArray?): Int {
+        val endpoint = subscription.endpoint
         require(validEndpoint(endpoint))
         val url=endpoint.toHttpUrl()
         val host=context.getSharedPreferences("iphone",0).getString("host","sms.example.com")!!
         val claims=JsonObject().apply { addProperty("aud","https://${url.host}");addProperty("exp",System.currentTimeMillis()/1000+3600);addProperty("sub","https://$host:8443") }
         val jwt=JsonWebSignature().apply { payload=claims.toString();algorithmHeaderValue=AlgorithmIdentifiers.ECDSA_USING_P256_CURVE_AND_SHA256;key=keys().private }.compactSerialization
-        return http.newCall(Request.Builder().url(url).header("Authorization","vapid t=$jwt, k=${publicKey()}")
-            .header("TTL","300").header("Urgency","high").post(ByteArray(0).toRequestBody()).build()).execute().use { it.code }
+        val request = Request.Builder().url(url).header("Authorization","vapid t=$jwt, k=${publicKey()}")
+            .header("TTL","300").header("Urgency","high")
+        val body = if(preview != null && subscription.publicKey != null && subscription.auth != null) {
+            request.header("Content-Encoding", "aes128gcm").header("Content-Type", "application/octet-stream")
+            PushEncryption.encrypt(subscription.publicKey, subscription.auth, preview)
+        } else ByteArray(0)
+        return http.newCall(request.post(body.toRequestBody()).build()).execute().use { it.code }
     }
     companion object {
         private val KEY_LOCK=Any()
@@ -58,13 +64,18 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         var retry=false
         var permanent=false
         PrivateStore(applicationContext).use { store ->
-            for(endpoint in store.subscriptions()) {
+            val preview by lazy {
+                if(inputData.getBoolean("test",false)) org.json.JSONObject().put("title","短信互联助手")
+                    .put("body","这是短信预览测试").toString().toByteArray()
+                else inputData.getByteArray("preview")?.let { runCatching { SecretVault(applicationContext).open(it) }.getOrNull() }
+            }
+            for(subscription in store.subscriptions()) {
                 // Recheck on execution and retry: the conversation may have been
-                // muted while offline. The sender stays on Android, never in the push.
+                // muted while offline.
                 if(!PushPolicy.allowed(inputData.getString("address"),store.conversations(),inputData.getBoolean("test",false))) return@withContext Result.success()
-                try { when(val status=WebPush(applicationContext).send(endpoint)) {
+                try { when(val status=WebPush(applicationContext).send(subscription, if(subscription.publicKey != null) preview else null)) {
                     404,410 -> {
-                        store.removeSubscription(endpoint);permanent=true
+                        store.removeSubscription(subscription.endpoint);permanent=true
                         applicationContext.getSharedPreferences("iphone",0).edit().putString("push-status","推送订阅已失效，请在 iPhone 重新订阅").apply()
                     }
                     429 -> retry=true
@@ -84,11 +95,28 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         } else Result.success()
     }
     companion object {
-        fun enqueuePeer(context:Context,address:String,event:String) {
+        private fun messageData(context: Context, address: String, body: String?, name: String?): Data {
+            val data = Data.Builder().putString("address",address.take(100))
+            PrivateStore(context).use { store ->
+                if(body != null && store.subscriptions().any { it.publicKey != null }) {
+                    // Keep only an encrypted, bounded snapshot in WorkManager, tied to this receipt.
+                    val sealed = runCatching {
+                        val history = SmsHistory(context, store)
+                        val title = name ?: history.contact(address) ?: history.format(address)
+                        val payload = org.json.JSONObject().put("title",title.take(100))
+                            .put("body",body.take(200)).put("address",PhoneIdentity.normalize(address).take(100))
+                        SecretVault(context).seal(payload.toString().toByteArray())
+                    }.getOrNull()
+                    if(sealed != null) data.putByteArray("preview", sealed)
+                }
+            }
+            return data.build()
+        }
+        fun enqueuePeer(context:Context,address:String,event:String,row:SmsRow?) {
             if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
             if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return
             val operation=WorkManager.getInstance(context).enqueueUniqueWork("iphone-push-"+event,ExistingWorkPolicy.KEEP,
-                OneTimeWorkRequestBuilder<WebPushWorker>().setInputData(workDataOf("address" to address.take(100)))
+                OneTimeWorkRequestBuilder<WebPushWorker>().setInputData(messageData(context,address,row?.body,row?.name))
                     .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build())
             // Called only from the IO service loop. Keep the journal until WorkManager
@@ -102,10 +130,10 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
             }
             throw IllegalStateException("Push enqueue confirmation timed out")
         }
-        fun enqueue(context: Context, address: String) {
+        fun enqueue(context: Context, address: String, body: String) {
             if(!context.getSharedPreferences("iphone",0).getBoolean("enabled",false))return
             if(!PrivateStore(context).use { PushPolicy.allowed(address,it.conversations()) })return
-            queue(context,workDataOf("address" to address.take(100)),false)
+            queue(context,messageData(context,address,body,null),false)
         }
         fun enqueueTest(context: Context) = queue(context,workDataOf("test" to true),true)
         private fun queue(context: Context,data: Data,test: Boolean) {

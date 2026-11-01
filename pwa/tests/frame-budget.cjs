@@ -43,7 +43,8 @@ const percentile=(values,p)=>{const sorted=[...values].sort((a,b)=>a-b);return s
     historyRequests++;const before=Number(url.searchParams.get('before')||Number.MAX_SAFE_INTEGER),available=rows.filter(m=>Number(m.id.slice(4))<before),items=available.slice(0,200);
     data={items,next:available.length>200?items.at(-1).id.slice(4):null};
    }else if(p==='/api/outgoing'||p==='/api/contacts'||p==='/api/conversations'&&route.request().method()==='GET')data=[];
-   else if(p==='/api/sims')data=[{id:1,name:'测试线路'}];
+   else if(p==='/api/phones'&&route.request().method()==='GET')data=[{id:'server',name:'服务器手机'}];
+   else if(p==='/api/sims')data=[{id:1,name:'测试线路',phoneId:'server',phoneName:'服务器手机',simName:'测试线路',slot:1}];
    else if(p==='/api/read')reads++;
    else if(p!=='/api/status'){
     mutations++;violations.push('unexpected API '+p);await route.fulfill({status:405,contentType:'application/json',body:JSON.stringify({error:'This regression test never sends or mutates messages'})});return;

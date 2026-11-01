@@ -134,8 +134,11 @@ class PeerHub(val ctx: Context): SQLiteOpenHelper(ctx,"paired-phone.db",null,2) 
             prefs.getString("auth","") to readableDatabase.rawQuery("SELECT id,address FROM push_events ORDER BY rowid LIMIT 20",null).use { c->buildList { while(c.moveToNext())add(c.getString(0) to c.getString(1)) } }
         }
         for((id,address) in pending) {
-            if(owner!=prefs.getString("auth",""))return
-            WebPushWorker.enqueuePeer(ctx,address,"peer-"+owner+"-"+id)
+            val message = synchronized(this) {
+                if(owner!=prefs.getString("auth",""))return
+                rows("SELECT row FROM history WHERE id=?",arrayOf(id)).firstOrNull()
+            }
+            WebPushWorker.enqueuePeer(ctx,address,"peer-"+owner+"-"+id,message)
             synchronized(this) { if(owner==prefs.getString("auth",""))writableDatabase.delete("push_events","id=?",arrayOf(id)) }
         }
     }

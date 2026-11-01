@@ -24,7 +24,7 @@ Production issuance schedules daily checks and attempts renewal with fewer than 
 
 Open the URL in Safari, use Share → Add to Home Screen, then launch it from the Home Screen. Generate a three-minute pairing code on Android, enter it on iPhone, and approve access on Android. Only authorize devices you trust to read and send SMS.
 
-iOS 16.4+ Home Screen web apps can request notification permission. Subscribe and test in Settings; successful submission does not prove reception, which must be confirmed on the device. Notifications omit message bodies and full numbers.
+iOS 16.4+ Home Screen web apps can request notification permission. Subscribe and test in Settings; successful submission does not prove reception, which must be confirmed on the device. Enable “显示短信预览（本设备）” in notification settings to include the sender and an excerpt on this device. Existing subscriptions keep generic alerts until enabled.
 
 Before sending, check the SIM and recipient. If the outcome is uncertain, verify actual reception before retrying. The app retains the original request ID rather than automatically creating a new send request. Refresh status when the network returns.
 

@@ -15,10 +15,15 @@ self.addEventListener('push', event => {
   try { payload = event.data?.json(); } catch { /* Older or invalid payload. */ }
   const preview = typeof payload?.title === 'string' && typeof payload?.body === 'string';
   const address = preview && typeof payload.address === 'string' ? payload.address.slice(0,100) : '';
-  event.waitUntil(self.registration.showNotification(preview ? payload.title : '短信互联助手', {
+  const notification = self.registration.showNotification(preview ? payload.title : '短信互联助手', {
     body: preview ? payload.body : '收到一条新短信',
     icon: '/icon-192.png', tag: address ? 'sms-' + address : 'sms', data: {address}
-  }));
+  });
+  // Push can arrive while the app is closed. Opening the app reconciles the count.
+  const badge = payload?.badge === false || !self.navigator?.setAppBadge
+    ? Promise.resolve()
+    : self.navigator.setAppBadge().catch(() => {});
+  event.waitUntil(Promise.all([notification, badge]));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();

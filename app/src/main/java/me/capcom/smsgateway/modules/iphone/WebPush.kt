@@ -66,7 +66,7 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         PrivateStore(applicationContext).use { store ->
             val preview by lazy {
                 if(inputData.getBoolean("test",false)) org.json.JSONObject().put("title","短信互联助手")
-                    .put("body","这是短信预览测试").toString().toByteArray()
+                    .put("body","这是短信预览测试").put("badge",false).toString().toByteArray()
                 else inputData.getByteArray("preview")?.let { runCatching { SecretVault(applicationContext).open(it) }.getOrNull() }
             }
             for(subscription in store.subscriptions()) {

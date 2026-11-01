@@ -208,6 +208,11 @@ function App(){
  const pins=useMemo(()=>filter==='all'&&!search&&!editing?conversationStates.filter(s=>s.pinned>0).sort((a,b)=>a.pinned-b.pinned).map(s=>list.find(c=>c.key===s.address)||{key:s.address,items:EMPTY}):[],[filter,search,editing,conversationStates,list]);
  const regular=useMemo(()=>visible.filter(c=>!pins.some(p=>p.key===c.key)),[visible,pins]);
  const unreadCount=list.filter(c=>isUnread(c.items,meta.get(c.key))).length;
+ useEffect(()=>{
+  if(!paired||!metadataReady||!navigator.setAppBadge)return;
+  const update=unreadCount?navigator.setAppBadge(unreadCount):navigator.clearAppBadge();
+  void update.catch(()=>{});
+ },[paired,metadataReady,unreadCount]);
  const contextItems=source.find(c=>c.key===(contextKey||lastContext.current))?.items||[],contextName=contextItems.find(m=>m.name)?.name||formatPhone(contextKey||lastContext.current||'',region);
  const lastOutgoing=current.map(m=>m.incoming).lastIndexOf(false);
  const navigation=useNavigation(screen,listPage,detailPage,()=>{setSheet(false);setMessageMenu(null);setMenu(false);setEditMenu(false);setActive(null);setScreen('messages');setError('')});

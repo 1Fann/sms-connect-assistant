@@ -2,6 +2,7 @@ import React,{useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Directory} from './Directory';
 import {Calling} from './Calling';
+import {AudioCheck} from './AudioCheck';
 import {api,request,PhoneError,err,type Session,type Device,type Line,type CallRecord,type PbxCall} from './client';
 import './phone.css';
 
@@ -37,6 +38,7 @@ async function enablePush(){
  await api('push/subscribe',{endpoint:sub.endpoint});
 }
 function App(){
+ const [calling,setCalling]=useState(false),[testing,setTesting]=useState(false);
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
  const [tab,setTab]=useState('最近通话'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');
  const [lineHint,hint]=useState({id:'',seq:0}),[order,setOrder]=useState<string[]>(()=>{try{const v=JSON.parse(localStorage.getItem('phone.order')||'[]');return Array.isArray(v)?v:[]}catch{return []}});
@@ -55,10 +57,11 @@ function App(){
    {!waiting&&!loading&&<form onSubmit={async e=>{e.preventDefault();try{await request('pair',{code});setCode('');wait(true);setMessage('')}catch(ex){setMessage(err(ex))}}}><input required aria-label="配对码" autoCapitalize="none" autoComplete="off" value={code} onChange={e=>setCode(e.target.value.trim())}/><button className="primary">请求配对</button></form>}{message&&<p role="alert">{message}</p>}</main>;
  const can=(p:string)=>session.permissions.includes(p);
  return <><main key={session.installationId}>{message&&<p role="status">{message}</p>}
-   <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint}/></div>
+   <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')&&!testing} lineHint={lineHint} onBusy={setCalling}/></div>
    {tab==='最近通话'&&(can('calls.read')?<Recent devices={devices} dial={dial}/>:<p>此安装未获通话记录授权</p>)}
    {(tab==='通讯录'||tab==='个人收藏')&&(can('contacts.read')?<Directory key={tab} devices={devices} lines={sorted} canEdit={can('contacts.write')} favorites={tab==='个人收藏'} dial={dial}/>:<p>此安装未获通讯录读取授权</p>)}
    {tab==='设置'&&<><h1>设置</h1><h2>设备与线路</h2>{devices.map(d=><section key={d.deviceId} className="card"><b>{d.name}</b><small>{d.online?'在线':'离线'}</small>{sorted.filter(l=>l.deviceId===d.deviceId).map(l=><div className="row" key={l.lineId}>{l.name}<span>{!l.confirmed?'待确认':l.online?'可用':'离线'}</span><button onClick={()=>{const v=[l.lineId,...sorted.map(x=>x.lineId).filter(id=>id!==l.lineId)];setOrder(v);localStorage.setItem('phone.order',JSON.stringify(v))}}>排在首位</button></div>)}</section>)}
+   {can('calls.dial')&&<AudioCheck disabled={calling} onBusy={setTesting}/>}
    <h2>通知</h2><button disabled={!can('calls.read')} onClick={()=>void enablePush().then(()=>setMessage('已开启未接来电提醒')).catch(e=>setMessage(err(e)))}>开启未接来电提醒</button>
    <button onClick={async()=>{try{await api('push/unsubscribe',{});const reg=await navigator.serviceWorker.ready;await(await reg.pushManager.getSubscription())?.unsubscribe();setMessage('已关闭电话通知')}catch(e){setMessage(err(e))}}}>关闭电话通知</button>
    <p className="hint">锁屏接听请在 Groundwire 中配置安卓主机提供的账号。</p><button onClick={async()=>{try{await request('logout',{});setSession(null);setLines([]);setDevices([]);setMessage('已退出')}catch(e){setMessage(err(e))}}}>退出此安装</button></>}

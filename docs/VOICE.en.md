@@ -33,3 +33,25 @@ Real WSS calling, iPhone foreground audio, dual-SIM routing, Chinese Caller ID, 
 ## Deployment update, 2026-11-02
 
 The user subsequently authorized deployment. Version 0.9.0-dev2 now runs on the connected Redmi. Web voice modules are enabled, ARI remains loopback-only, and the Phone HTTPS origin provides an authenticated SIP-only WebSocket proxy. Existing gateway and Groundwire accounts are reused while incoming routes are retained. SIP registration/cleanup and real TLS authorization/revocation checks passed. Carrier calls, two-way media and handoff remain unverified. See [the deployment record](COMMLINK-UPGRADE.md).
+
+
+## ARI dial accepted but no outbound INVITE (2026-11-02 repair)
+
+The host was missing bridge_holding.so. ARI create/dial uses an internal holding dial bridge before calling the channel. The HTTP dial request can be accepted while that asynchronous operation fails, leaving the Android controller waiting until its deadline. Simple/mixing bridges and SIP registration alone do not verify this dependency.
+
+The module is now loaded and explicitly persisted in modules.conf without replacing accounts, routes or app data. The deployment checklist also retains bridge_simple, bridge_softmix, res_timing_timerfd, RTP and codecs. The exported provisioning notes now include this requirement.
+
+verification/ari_loopback_dial.py reproduced the failure before repair and received the correct INVITE and destination/SIM headers afterward. It uses a separate ARI event application and a temporary endpoint whose sole contact is an ephemeral 127.0.0.1 UDP socket. No carrier, registered gateway or Groundwire endpoint is dialed. It requires an idle PBX, returns a synthetic busy response, and removes the temporary resources. Credentials are read only from a private file inside the PBX. This is signaling validation, not proof of real calls or bidirectional media.
+
+See [Asterisk 20.6 control.c](https://github.com/asterisk/asterisk/blob/20.6.0/res/stasis/control.c), get_dial_bridge and app_control_dial.
+
+
+## WebRTC media repair and microphone lifecycle (0.9.0-dev3 / 26)
+
+RTP from the Android gateway advanced while the browser leg stayed at zero. A real browser echo test reproduced ICE checking / DTLS new. The virtual WebSocket transport was bound to loopback; Asterisk 20.6 also used that transport address for its RTP socket. Changing its bind to [::] restored routable IPv4/IPv6 ICE candidates without changing the loopback-only HTTP/ARI listener or adding a TCP 5060 listener.
+
+The production HTTPS/WSS echo test then reached connected for ICE, DTLS and peer connection, receiving/sending 504 packets in roughly ten seconds with no external allocation request. The user confirmed iPhone echo and two-way carrier audio on the home Wi-Fi with VPN disabled. WAN, VPN, CallKit and native handoff remain separate acceptance items.
+
+The Phone settings now include a bounded internal Echo test (no phone/carrier), explicit playback recovery, and per-call microphone capture shared by SDP operations and stopped at completion/cancellation. Late permission results are also stopped. 39 frontend tests, 152 JVM tests and the signed build passed. Temporary diagnostic authorization/processes were removed and SIP history disabled/cleared.
+
+Home Screen permission persistence remains controlled by iOS. Safari per-site permission is not guaranteed to apply to the installed PWA. See [WebKit issue 327237](https://bugs.webkit.org/show_bug.cgi?id=327237); no permanent permission is promised and capture is not retained after calls.

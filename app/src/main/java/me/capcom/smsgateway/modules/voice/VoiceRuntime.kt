@@ -115,7 +115,7 @@ class VoiceRuntime internal constructor(context:Context,
     @Synchronized fun session():Map<String,Any>{
         if(!connected||!config.enabled)throw VoiceFault(503,"语音后台未就绪")
         return mapOf("uri" to "sip:"+config.webUser+"@"+config.domain,"wss" to config.wss,"username" to config.webUser,
-            "password" to config.secret("voice-web"),"iceServers" to config.iceServers())
+            "password" to config.secret("voice-web"),"iceServers" to config.iceServers(),"testTarget" to "sip:cl-audio-test@"+config.domain)
     }
     @Synchronized fun testNative(){
         if(!connected||!ari.endpoint(config.nativeUser).let{it.online && it.channels==0})throw VoiceFault(503,"Groundwire 端点未就绪")

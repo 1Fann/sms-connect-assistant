@@ -74,3 +74,13 @@ Build the two web entries before the APK. The isolated Android instrumentation b
 The connected Redmi now runs signed 0.9.0-dev2 (25), retaining the original package/data. Asterisk web voice modules are enabled; ARI remains loopback-only. Phone exposes an authenticated, same-origin SIP WebSocket proxy with bounded frames/queues and live revocation. Existing gateway 2001 and Groundwire 1001 are reused, retaining incoming routes. SIP registration/cleanup and real Android TLS/WS checks passed without automatically originating external calls. Temporary test apps/sessions were removed; 152 JVM tests passed.
 
 Carrier calls, two-way media, CallKit, handoff, contacts writeback and cross-network media remain unverified. TURN is not configured. The app data snapshot was taken after the first upgrade and is not a verified pre-migration rollback. PBX configuration is site-specific and is not created automatically by installing the APK.
+
+
+## 同日呼出依赖补修
+
+实际网页呼叫随后暴露了遗漏的 bridge_holding.so：ARI 已接受 dial，但内部 holding dial_bridge 无技术实现，未发出网关 INVITE。主节点已即时加载并写入持久 modules.conf。回环 UDP 合成端点测试在修复前复现失败、修复后收到携带正确号码/SIM 头的 INVITE，未由自动测试发起真实电话。详见 [语音故障与验证](VOICE.zh-CN.md)。本项是 PBX 配置修复，当前已安装 APK 仍为 0.9.0-dev2；源码的离线配置草案说明也已补充该依赖。
+
+
+## 同日无声修复与实测（0.9.0-dev3 / 26）
+
+主节点已覆盖安装 dev3。修复 WS transport 的 RTP 回环绑定后，实际浏览器 Echo 收发均有数据，用户也已确认 iPhone 回声和真实通话双向声音正常（家庭 Wi-Fi、无 VPN）。新增仅连接主节点的音频测试、单次通话麦克风流复用及取消释放、声音播放重试和包计数。39 项前端、152 项 JVM 测试及签名构建通过。当前仅保留原用户电话授权，临时诊断授权/进程和 SIP history 已清理。跨网络、锁屏和接续仍待单独验收。主屏幕 PWA 重开后的麦克风再次授权属于平台限制，详见语音文档。

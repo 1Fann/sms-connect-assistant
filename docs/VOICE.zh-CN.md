@@ -46,3 +46,33 @@ CommLink 通过独立的本机 Asterisk ARI 控制器保有外线，在网页和
 - 需后续真机验证新账号的 Groundwire 原生和锁屏响铃、CallKit 应答、Caller ID 中文、内外网双向音频、Wi-Fi/热点/VPN、WebRTC 和 Groundwire 交接是否保有同一条 SIM 外线。仅在具备明确授权时测试真实号码；本次未执行这些测试。
 
 参考：[Asterisk WebRTC](https://docs.asterisk.org/Configuration/WebRTC/Configuring-Asterisk-for-WebRTC-Clients/)、[ARI Channels](https://docs.asterisk.org/Asterisk_20_Documentation/API_Documentation/Asterisk_REST_Interface/Channels_REST_API/)、[Acrobits 来电接续流程](https://doc.acrobits.net/server-components/sipis/incoming-calls/)。
+
+
+## 呼出卡在等待：ARI holding bridge 依赖（2026-11-02 修复）
+
+实机出现“注册在线、ARI 接受 dial，但安卓未呼出”。持久通话状态停在 DIALING 后超时，Asterisk 同时记录 “Could not create class stasis. No technology to support it.”。已加载的 bridge_simple、bridge_softmix 不能替代 bridge_holding。Asterisk 20 的 ARI create/dial 在真正调用通道之前，会把它放入内部 holding dial_bridge；缺少该技术时异步执行失败，即使 dial HTTP 已返回 204，也没有向网关发出 INVITE。
+
+已在主节点即时加载 bridge_holding.so，并将 load=bridge_holding.so 写入现有 modules.conf，保留原账户、拨号计划和应用数据，无需重装 Asterisk 或 Android App。原配置的备份位于设备 root 私有目录。部署清单还应明确保留 bridge_simple、bridge_softmix、res_timing_timerfd、res_rtp_asterisk 和对应编解码器。
+
+新增 verification/ari_loopback_dial.py，使用独立的临时 ARI 事件应用，以及只指向 127.0.0.1 临时 UDP 端口的合成 SIP 端点，验证真实 Asterisk 的 create → 设置号码/SIM 头 → dial 路径。不会选择已注册的网关、Groundwire 或真实电话。缺模块时稳定复现 HTTP 接受但 INVITE 不到达；加载后 INVITE 到达且两条选卡/拨号头正确。合成端点返回忙线，测试结束移除临时通道、端点和事件连接。检查开始前要求 PBX 无活跃通道。
+
+该脚本使用 PBX 内的私有凭据文件，字段为 port、ariUser、ariPassword。必须在主节点 chroot 内以管理员身份运行，不能将凭据文件放入源码。正常验证命令为：
+    python3 /opt/asterisk-app/ari_loopback_dial.py --credentials-file <PBX内部私有配置路径>
+只有复现已知缺模块状态才使用 --expect-no-invite。这个检查验证呼出信令链路，不代表真实蜂窝接通、WebRTC 双向媒体或 Groundwire 接续已验收。
+
+模块 loading 与错误依据：[Asterisk 20.6 control.c](https://github.com/asterisk/asterisk/blob/20.6.0/res/stasis/control.c)，见 get_dial_bridge 与 app_control_dial。
+
+
+## WebRTC 无声与麦克风处理（0.9.0-dev3 / 26）
+
+用户确认网页能够呼出后，真实测试显示：安卓网关收到的 RTP 包持续增长，而网页端收发均为零。独立浏览器回声测试也复现 ICE checking / DTLS new，尚无加密媒体连接。
+
+根因是 WebSocket 虚拟 transport 的 bind=127.0.0.1。Asterisk 20.6 的 create_rtp 会将 transport 的地址用于 RTP 套接字；只打开 rtp_ipv6 不会改变这一绑定。信令代理的回环地址因此被错误沿用为媒体绑定，提供的 ICE 候选无法完成有效连接。已将虚拟 WS transport 改为 bind=[::]，HTTP / ARI 仍只绑定 127.0.0.1:8088，浏览器仍通过受授权保护的 HTTPS /ws 代理访问。实测未新增 TCP 5060 监听，也没有把 ARI 暴露到公网。该方式不依赖写死的家庭 IPv6 地址。
+
+修复后，实际浏览器通过生产 HTTPS/WSS 入口连接内部 Echo，ICE、DTLS 和 peer connection 均 connected，约十秒内收到和发出音频包分别为 504；没有调用外线分配 API。随后用户在 iPhone 主屏幕应用确认能听到回声，并再次确认真实蜂窝测试双方都能听见。当前验收范围为该家庭 Wi-Fi、未开启 VPN 的场景；外网、VPN、锁屏及 Groundwire 接续不能由此推定通过。
+
+新版加入「设置 → 通话音频测试」，仅拨主节点的 cl-audio-test 内部扩展，使用 Echo 且服务端最长 30 秒，结束释放麦克风。该扩展没有外线拨号指令。网页拨号时先从用户点击申请一次音频流，同一通话的 SDP 处理复用该流；晚到的权限结果会在取消后关闭。增加播放重试按钮、媒体连接/包计数提示，以及相应资源释放测试。39 项前端测试、152 项 JVM 测试与签名发布构建通过；临时诊断安装授权和浏览器进程已移除，SIP history 已关闭并清空。
+
+主屏幕 PWA 重新启动后的麦克风询问仍受 iOS/WebKit 控制，不能由安卓、PBX 或网页永久授权；Safari 单站允许不保证继承到主屏幕应用。已更正界面说明，不以通话结束后保持采集的方式伪装永久授权。对应 [WebKit 327237](https://bugs.webkit.org/show_bug.cgi?id=327237) 是主屏幕应用跨启动权限的公开问题报告，不代表每个系统版本或本设备的所有权限行为均已验证。
+
+源码依据：[Asterisk 20.6 create_rtp](https://github.com/asterisk/asterisk/blob/20.6.0/res/res_pjsip_sdp_rtp.c)。

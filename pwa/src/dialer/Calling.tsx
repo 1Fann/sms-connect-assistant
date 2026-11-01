@@ -1,12 +1,13 @@
 import {useEffect,useRef,useState} from 'react';
 import {SimpleUser} from 'sip.js/lib/platform/web';
 import {api,err,PhoneError,type Line,type PbxCall} from './client';
+import {CallMedia,playAudio} from './media';
 
 type Endpoint={uri:string,wss:string,username:string,password:string,iceServers?:RTCIceServer[]};
 type Voice={ready:boolean,reason:string,groundwire?:{registered:boolean},gateways?:{deviceId:string,registered:boolean,busy:boolean}[]};
 const phases:Record<string,string>={WAITING_WEB:'等待网页连接',DIALING:'正在呼叫',WEB_ACTIVE:'通话中',HANDOFF_REQUESTED:'正在请求接续',NATIVE_RINGING:'请在 Groundwire 接听',NATIVE_ANSWERED:'Groundwire 已接听',MEDIA_VERIFYING:'正在验证媒体',NATIVE_ACTIVE:'Groundwire 通话中',RECOVERING:'正在恢复连接',HANDOFF_FAILED:'接续未成功',CALL_ENDED:'通话已结束'};
 const available=(line:Line)=>(line.lineOnline??line.online)&&line.confirmed;
-export function Calling({lines,number,setNumber,enabled,lineHint}:{lines:Line[],number:string,setNumber:(v:string)=>void,enabled:boolean,lineHint:{id:string,seq:number}}){
+export function Calling({lines,number,setNumber,enabled,lineHint,onBusy}:{lines:Line[],number:string,setNumber:(v:string)=>void,enabled:boolean,lineHint:{id:string,seq:number},onBusy:(value:boolean)=>void}){
   const [selected,setSelected]=useState(()=>localStorage.getItem('phone.lastLine')||'');
   const [voice,setVoice]=useState<Voice|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [call,setCall]=useState<PbxCall|null>(null),[activeId,setId]=useState(()=>sessionStorage.getItem('phone.call')||'');
@@ -14,19 +15,29 @@ export function Calling({lines,number,setNumber,enabled,lineHint}:{lines:Line[],
   const [auto,setAuto]=useState(()=>localStorage.getItem('phone.autoHandoff')==='true');
   const sip=useRef<SimpleUser|null>(null),audio=useRef<HTMLAudioElement>(null),pending=useRef(false),handoff=useRef('');
   const [now,setNow]=useState(Date.now());
+  const capture=useRef<CallMedia|null>(null);
+  const [blocked,setBlocked]=useState(false),[audioStats,setAudioStats]=useState('');
+  useEffect(()=>{onBusy(!!activeId||busy)},[activeId,busy,onBusy]);
+  function play(){void playAudio(audio.current).then(()=>setBlocked(false)).catch(()=>setBlocked(true))}
+  useEffect(()=>{
+    if(!activeId)return;
+    const t=setInterval(()=>{void capture.current?.summary().then(setAudioStats).catch(()=>{})},1500);
+    return()=>clearInterval(t);
+  },[activeId]);
   useEffect(()=>{
     if(lineHint.seq>0 && !activeId)setSelected(lineHint.id);
   },[lineHint,activeId]);
   function detach(){
     const user=sip.current;sip.current=null;
+    capture.current?.release();capture.current=null;setAudioStats('');
     if(user)void user.disconnect().catch(()=>{});
   }
   function releaseLocal(){
     setId('');sessionStorage.removeItem('phone.call');sessionStorage.removeItem('phone.handoff');detach();
   }
   async function status(){try{setVoice(await api<Voice>('voice/status'))}catch(e){setError(err(e))}}
-  useEffect(()=>{void status();const t=setInterval(()=>{if(!document.hidden)void status()},15000);return()=>clearInterval(t)},[]);
-  useEffect(()=>()=>{void sip.current?.disconnect().catch(()=>{})},[]);
+  useEffect(()=>{if(!enabled)return;void status();const t=setInterval(()=>{if(!document.hidden)void status()},15000);return()=>clearInterval(t)},[enabled]);
+  useEffect(()=>()=>{capture.current?.release();void sip.current?.disconnect().catch(()=>{})},[]);
   useEffect(()=>{
     if(!activeId)return;
     let alive=true,running=false;
@@ -57,20 +68,28 @@ export function Calling({lines,number,setNumber,enabled,lineHint}:{lines:Line[],
   async function webSession(){
       if(!audio.current)throw Error('页面音频尚未就绪');
       detach();
+      const local=new CallMedia(state=>{if(state==='failed')setMedia('音频连接失败，请检查当前网络')});
+      capture.current=local;
+      await local.acquire();
       const config=await api<Endpoint>('voice/web-session',{});
+      if(local.isClosed)throw new DOMException('通话已取消','AbortError');
       const user=new SimpleUser(config.wss,{aor:config.uri,sendDTMFUsingSessionDescriptionHandler:true,media:{constraints:{audio:true,video:false},remote:{audio:audio.current}},
-        userAgentOptions:{authorizationUsername:config.username,authorizationPassword:config.password,logBuiltinEnabled:false,
+        userAgentOptions:{sessionDescriptionHandlerFactory:local.factory,authorizationUsername:config.username,authorizationPassword:config.password,logBuiltinEnabled:false,
           sessionDescriptionHandlerFactoryOptions:{peerConnectionConfiguration:{iceServers:config.iceServers||[]}}},
-        delegate:{onCallAnswered:()=>setMedia('SIP 已应答'),onCallHangup:()=>setMedia('网页通道已关闭'),
+        delegate:{onCallAnswered:()=>{setMedia('SIP 已应答');play()},onCallHangup:()=>{capture.current?.release();setMedia('网页通道已关闭')},
           onServerDisconnect:()=>setMedia('信令连接已断开'),onCallHold:setHeld}});
-      sip.current=user;await user.connect();await user.register();return user;
+      sip.current=user;await user.connect();
+      if(local.isClosed)throw new DOMException('通话已取消','AbortError');
+      await user.register();
+      if(local.isClosed)throw new DOMException('通话已取消','AbortError');
+      return user;
   }
   async function dial(resume=false){
     const recovering=resume&&call?.state==='WAITING_WEB'&&activeId===call.id;
     const route=recovering?call.lineId:selected,destination=recovering?call.number:number;
     const line=lines.find(l=>l.lineId===route);
     if(!enabled||pending.current||(activeId&&!recovering)||!line||!available(line)||!voice?.ready)return;
-    pending.current=true;setBusy(true);setError('');setMedia('连接中');
+    pending.current=true;setBusy(true);setError('');setMedia('连接中');setBlocked(false);
     if(!recovering){handoff.current='';sessionStorage.removeItem('phone.handoff')}
     let id='';
     try{
@@ -93,11 +112,12 @@ export function Calling({lines,number,setNumber,enabled,lineHint}:{lines:Line[],
   const canDial=(line:Line)=>available(line)&&voice?.gateways?.some(g=>g.deviceId===line.deviceId&&g.registered&&!g.busy);
   const connected=call?.state==='WEB_ACTIVE'||call?.state==='HANDOFF_FAILED';
   const elapsed=call?.answeredAt?Math.max(0,Math.floor(((call.endedAt||now)-call.answeredAt)/1000)):0;
-  return <><audio ref={audio} autoPlay playsInline/>
+  return <><audio ref={audio} autoPlay playsInline onPlaying={()=>setBlocked(false)}/>
     {activeId?<section className="live">
       <small>{lines.find(l=>l.lineId===call?.lineId)?.name}</small><h1>{call?.number}</h1>
       <p>{phases[call?.state||'']||'查询真实通话状态…'}</p>{!!call?.answeredAt&&<time>{Math.floor(elapsed/60)}:{String(elapsed%60).padStart(2,'0')}</time>}
-      <p>{media} {call?.reason}</p><div className="controls">
+      <p>{media} {call?.reason}</p>{audioStats&&<small>{audioStats}</small>}<div className="controls">
+        <button disabled={!connected||!sip.current} onClick={play}>{blocked?'点此启用声音':'播放通话声音'}</button>
         {call?.state==='WAITING_WEB'&&(!sip.current||error)&&<button disabled={busy} onClick={()=>void dial(true)}>继续连接此通话</button>}
         <button disabled={!connected||!sip.current} onClick={()=>{if(muted)sip.current?.unmute();else sip.current?.mute();setMuted(sip.current?.isMuted()||false)}}>{muted?'取消静音':'静音'}</button>
         <button disabled={!connected||!sip.current||busy} onClick={()=>void action(async()=>{if(held)await sip.current?.unhold();else await sip.current?.hold()})}>{held?'继续':'保持'}</button>

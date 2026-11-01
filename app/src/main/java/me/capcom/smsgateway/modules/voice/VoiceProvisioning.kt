@@ -17,7 +17,8 @@ internal object VoiceProvisioning {
             appendLine("[general]\nenabled=yes\npretty=no")
             appendLine("[<LOCAL_ARI_USER>]\ntype=user\nread_only=no\npassword=<LOCAL_ARI_PASSWORD>")
             appendLine("; --- pjsip.conf ---")
-            appendLine("[cl-wss]\ntype=transport\nprotocol=wss\nbind=127.0.0.1")
+            appendLine("[cl-wss]\ntype=transport\nprotocol=ws\nbind=[::]")
+            appendLine("; WS signaling stays on the loopback HTTP listener; the virtual transport must not bind RTP to loopback.")
             appendLine("; Provide a tested SIP/TLS transport for Groundwire and each compatible gateway.")
             appendLine("; Supply certificate, reachable signaling/media addresses, ICE, RTP ports and firewall per site.")
             fun endpoint(name:String,context:String,transport:String,pass:String,isWeb:Boolean){
@@ -36,13 +37,14 @@ internal object VoiceProvisioning {
                 endpoint(gateway.second,"cl-gateway-in","<TESTED_GATEWAY_TRANSPORT>","UNIQUE_GATEWAY_PASSWORD_"+(index+1),false)
             }
             appendLine("; --- extensions.conf (isolated contexts; do not include an external dialing context) ---")
-            appendLine("[cl-web-in]\nexten => _.,1,Stasis(commlink,web)\n same => n,Hangup()")
+            appendLine("[cl-web-in]\nexten => cl-audio-test,1,Set(TIMEOUT(absolute)=30)\n same => n,Answer()\n same => n,Echo()\n same => n,Hangup()\nexten => _.,1,Stasis(commlink,web)\n same => n,Hangup()")
             appendLine("[cl-native-in]\nexten => _.,1,Hangup()")
             appendLine("[cl-gateway-in]\nexten => _.,1,Stasis(commlink,incoming)\n same => n,Hangup()")
             appendLine("; If one gateway has multiple SIMs, replace its context with one route per verified distinct incoming DID.")
             appendLine("; Pass Stasis(commlink,incoming,<CONFIRMED_LOGICAL_LINE_ID>); do not guess SIM from the caller number.")
             appendLine("; Outbound: ARI creates the authenticated gateway leg and sets X-VSA-Dial and X-VSA-SIM before dial.")
-            appendLine("; Required: res_stasis, res_ari + channels/bridges/endpoints/events, res_http_websocket,")
+            appendLine("; Required: bridge_holding (ARI outbound dial), bridge_softmix, res_timing_timerfd, app_echo,")
+            appendLine("; res_stasis, res_ari + channels/bridges/endpoints/events, res_http_websocket,")
             appendLine("; res_pjsip_transport_websocket, res_rtp_asterisk, PJSIP_HEADER and TIMEOUT functions.")
         }
     }

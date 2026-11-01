@@ -33,7 +33,7 @@ const server=http.createServer((req,res)=>{
  await page.getByRole('button',{name:'拨打此号码'}).click();
  assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),'5550100');
  assert.ok(await page.getByRole('button',{name:'拨打',exact:true}).isDisabled());
- await page.locator('nav button').filter({hasText:'通讯录'}).click();
+ await page.locator('nav button').filter({hasText:'联系人'}).click();
  await page.getByRole('button',{name:/合成联系人/}).click();
  await page.getByRole('button',{name:'编辑',exact:true}).click();
  await page.getByLabel('姓名或备注').fill('合成备注');

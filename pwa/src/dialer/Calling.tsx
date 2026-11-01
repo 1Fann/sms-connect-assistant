@@ -2,18 +2,26 @@ import {useEffect,useRef,useState} from 'react';
 import {SimpleUser} from 'sip.js/lib/platform/web';
 import {api,err,PhoneError,type Line,type PbxCall} from './client';
 import {CallMedia,playAudio} from './media';
+import {PhoneIcon} from './PhoneIcon';
+import {formatPhone} from '../phone';
 
 type Endpoint={uri:string,wss:string,username:string,password:string,iceServers?:RTCIceServer[]};
 type Voice={ready:boolean,reason:string,groundwire?:{registered:boolean},gateways?:{deviceId:string,registered:boolean,busy:boolean}[]};
 const phases:Record<string,string>={WAITING_WEB:'等待网页连接',DIALING:'正在呼叫',WEB_ACTIVE:'通话中',HANDOFF_REQUESTED:'正在请求接续',NATIVE_RINGING:'请在 Groundwire 接听',NATIVE_ANSWERED:'Groundwire 已接听',MEDIA_VERIFYING:'正在验证媒体',NATIVE_ACTIVE:'Groundwire 通话中',RECOVERING:'正在恢复连接',HANDOFF_FAILED:'接续未成功',CALL_ENDED:'通话已结束'};
 const available=(line:Line)=>(line.lineOnline??line.online)&&line.confirmed;
-export function Calling({lines,number,setNumber,enabled,lineHint,onBusy}:{lines:Line[],number:string,setNumber:(v:string)=>void,enabled:boolean,lineHint:{id:string,seq:number},onBusy:(value:boolean)=>void}){
+export function Calling({lines,number,setNumber,enabled,lineHint,onBusy,openSettings}:{lines:Line[],number:string,setNumber:(v:string)=>void,enabled:boolean,lineHint:{id:string,seq:number},onBusy:(value:boolean)=>void,openSettings:()=>void}){
   const [selected,setSelected]=useState(()=>localStorage.getItem('phone.lastLine')||'');
   const [voice,setVoice]=useState<Voice|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [call,setCall]=useState<PbxCall|null>(null),[activeId,setId]=useState(()=>sessionStorage.getItem('phone.call')||'');
   const [media,setMedia]=useState(''),[held,setHeld]=useState(false),[muted,setMuted]=useState(false);
   const [auto,setAuto]=useState(()=>localStorage.getItem('phone.autoHandoff')==='true');
   const sip=useRef<SimpleUser|null>(null),audio=useRef<HTMLAudioElement>(null),pending=useRef(false),handoff=useRef('');
+  const [dtmf,setDtmf]=useState(false);
+  const digitTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),deleteTimer=useRef<ReturnType<typeof setInterval>|undefined>(undefined),longPress=useRef(false),currentNumber=useRef(number);currentNumber.current=number;
+  function clearPress(){if(digitTimer.current)clearTimeout(digitTimer.current);if(deleteTimer.current)clearInterval(deleteTimer.current)}
+  useEffect(()=>{const cancel=()=>clearPress();window.addEventListener('blur',cancel);document.addEventListener('visibilitychange',cancel);return()=>{clearPress();window.removeEventListener('blur',cancel);document.removeEventListener('visibilitychange',cancel)}},[]);
+  function zeroDown(){longPress.current=false;digitTimer.current=setTimeout(()=>{longPress.current=true;if(!currentNumber.current)setNumber('+')},450)}
+  function deleteDown(){longPress.current=false;digitTimer.current=setTimeout(()=>{longPress.current=true;setNumber(currentNumber.current.slice(0,-1));deleteTimer.current=setInterval(()=>setNumber(currentNumber.current.slice(0,-1)),85)},350)}
   const [now,setNow]=useState(Date.now());
   const capture=useRef<CallMedia|null>(null);
   const [blocked,setBlocked]=useState(false),[audioStats,setAudioStats]=useState('');
@@ -114,25 +122,26 @@ export function Calling({lines,number,setNumber,enabled,lineHint,onBusy}:{lines:
   const elapsed=call?.answeredAt?Math.max(0,Math.floor(((call.endedAt||now)-call.answeredAt)/1000)):0;
   return <><audio ref={audio} autoPlay playsInline onPlaying={()=>setBlocked(false)}/>
     {activeId?<section className="live">
-      <small>{lines.find(l=>l.lineId===call?.lineId)?.name}</small><h1>{call?.number}</h1>
-      <p>{phases[call?.state||'']||'查询真实通话状态…'}</p>{!!call?.answeredAt&&<time>{Math.floor(elapsed/60)}:{String(elapsed%60).padStart(2,'0')}</time>}
-      <p>{media} {call?.reason}</p>{audioStats&&<small>{audioStats}</small>}<div className="controls">
-        <button disabled={!connected||!sip.current} onClick={play}>{blocked?'点此启用声音':'播放通话声音'}</button>
-        {call?.state==='WAITING_WEB'&&(!sip.current||error)&&<button disabled={busy} onClick={()=>void dial(true)}>继续连接此通话</button>}
-        <button disabled={!connected||!sip.current} onClick={()=>{if(muted)sip.current?.unmute();else sip.current?.mute();setMuted(sip.current?.isMuted()||false)}}>{muted?'取消静音':'静音'}</button>
-        <button disabled={!connected||!sip.current||busy} onClick={()=>void action(async()=>{if(held)await sip.current?.unhold();else await sip.current?.hold()})}>{held?'继续':'保持'}</button>
-        <button disabled={!connected||busy} onClick={()=>void action(async()=>{
-          if(call?.state==='HANDOFF_FAILED'){handoff.current='';sessionStorage.removeItem('phone.handoff')}
-          const result=await api<PbxCall>('calls/'+activeId+'/handoff',handoffBody());setCall(result);
-        })}>切换至后台通话</button>
-      </div><div className="dtmf">{'123456789*0#'.split('').map(k=><button key={k} disabled={!connected||!sip.current} onClick={()=>void action(async()=>sip.current?.sendDTMF(k))}>{k}</button>)}</div>
-      <button className="hangup" disabled={busy} onClick={()=>void action(()=>api('calls/'+activeId+'/hangup',{}))}>挂断</button>
-    </section>:<><h1>拨号键盘</h1>
-      <input className="number" inputMode="tel" aria-label="电话号码" value={number} maxLength={24} onChange={e=>setNumber(e.target.value)}/>
-      <div className="keypad">{'123456789*0#'.split('').map((k,i)=><button key={k} onClick={()=>setNumber((number+k).slice(0,24))}>{k}<small>{['','ABC','DEF','GHI','JKL','MNO','PQRS','TUV','WXYZ','','+',''][i]}</small></button>)}</div>
-      <div className="dialrow"><button onClick={()=>setNumber(number.startsWith('+')?number:'+'+number)}>＋</button><button className="dial" disabled={!enabled||busy||!voice?.ready||!lines.some(l=>l.lineId===selected&&canDial(l))||!/^\+?\d{3,20}$/.test(number)} onClick={()=>void dial()}>拨打</button><button aria-label="退格" onClick={()=>setNumber(number.slice(0,-1))}>⌫</button></div>
-      <label>拨出线路<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">选择线路</option>{selected&&!lines.some(l=>l.lineId===selected)&&<option value={selected} disabled>原选线路不可用</option>}{lines.map(l=><option key={l.lineId} value={l.lineId} disabled={!canDial(l)}>{l.name}{!canDial(l)?' · 不可拨出':''}</option>)}</select></label>
-      <label><input type="checkbox" checked={auto} onChange={e=>{setAuto(e.target.checked);localStorage.setItem('phone.autoHandoff',String(e.target.checked))}}/> 切到后台时请求 Groundwire 接续</label>
-      <p className="hint">{!enabled?'本安装尚未获拨号授权':voice?.reason||(!voice?.ready?'正在检查语音网关':'语音网关就绪')}</p>{call?.state==='CALL_ENDED'&&<p>上一通电话已结束</p>}
-    </>}{error&&<p role="alert">{error}</p>}</>;
+      <div className="live-heading"><small>{lines.find(l=>l.lineId===call?.lineId)?.name}</small><h1>{formatPhone(call?.number||'')}</h1><p>{phases[call?.state||'']||'查询通话状态…'}</p>{!!call?.answeredAt&&<time>{Math.floor(elapsed/60)}:{String(elapsed%60).padStart(2,'0')}</time>}</div>
+      {dtmf?<div className="keypad in-call-keypad">{'123456789*0#'.split('').map(k=><button key={k} disabled={!connected||!sip.current} onClick={()=>void action(async()=>sip.current?.sendDTMF(k))}>{k}</button>)}</div>:
+      <div className="call-controls">
+        <button disabled={!connected||!sip.current} aria-pressed={muted} onClick={()=>{if(muted)sip.current?.unmute();else sip.current?.mute();setMuted(sip.current?.isMuted()||false)}}><i><PhoneIcon name="mute" size={28}/></i><span>{muted?'取消静音':'静音'}</span></button>
+        <button disabled={!connected||!sip.current} onClick={()=>setDtmf(true)}><i><PhoneIcon name="keypad" size={28}/></i><span>拨号键盘</span></button>
+        <button disabled={!connected||!sip.current} onClick={play}><i><PhoneIcon name="speaker" size={28}/></i><span>{blocked?'启用声音':'播放声音'}</span></button>
+        <button disabled={!connected||!sip.current||busy} aria-pressed={held} onClick={()=>void action(async()=>{if(held)await sip.current?.unhold();else await sip.current?.hold()})}><i><PhoneIcon name="hold" size={28}/></i><span>{held?'继续':'保持'}</span></button>
+        <button disabled={!connected||busy} onClick={()=>void action(async()=>{if(call?.state==='HANDOFF_FAILED'){handoff.current='';sessionStorage.removeItem('phone.handoff')}const result=await api<PbxCall>('calls/'+activeId+'/handoff',handoffBody());setCall(result)})}><i><PhoneIcon name="handoff" size={28}/></i><span>接续至 Groundwire</span></button>
+      </div>}
+      {dtmf&&<button className="hide-keypad" onClick={()=>setDtmf(false)}>隐藏拨号键盘</button>}
+      {call?.state==='WAITING_WEB'&&(!sip.current||error)&&<button disabled={busy} onClick={()=>void dial(true)}>继续连接此通话</button>}
+      <button className="hangup" aria-label="挂断" disabled={busy} onClick={()=>void action(()=>api('calls/'+activeId+'/hangup',{}))}><PhoneIcon name="phone" size={32}/></button>
+      <details className="call-diagnostics"><summary>音频状态</summary><p>{media} {call?.reason}</p>{audioStats&&<small>{audioStats}</small>}</details>
+    </section>:<section className="dialer-screen">
+      <div className="dial-top"><label className="line-chip"><span className="sr-only">拨出线路</span><select aria-label="拨出线路" value={selected} onChange={e=>setSelected(e.target.value)}><option value="">选择线路</option>{selected&&!lines.some(l=>l.lineId===selected)&&<option value={selected} disabled>原选线路不可用</option>}{lines.map(l=><option key={l.lineId} value={l.lineId} disabled={!canDial(l)}>{l.name}{!canDial(l)?' · 不可拨出':''}</option>)}</select></label><button className="glass-circle" aria-label="互联设置" onClick={openSettings}><PhoneIcon name="settings" size={22}/></button></div>
+      <div className="dial-number-area"><input className="number" inputMode="none" aria-label="电话号码" autoComplete="off" spellCheck={false} value={formatPhone(number)} maxLength={32} onChange={e=>setNumber(e.target.value.replace(/[^+0-9*#]/g,'').slice(0,24))}/></div>
+      <div className="keypad">{'123456789*0#'.split('').map((k,i)=><button key={k} aria-label={k} onPointerDown={k==='0'?zeroDown:undefined} onPointerUp={clearPress} onPointerCancel={clearPress} onPointerLeave={clearPress} onContextMenu={e=>e.preventDefault()} onClick={()=>{if(k==='0'&&longPress.current){longPress.current=false;return}setNumber((number+k).slice(0,24))}}><span>{k}</span><small>{['','ABC','DEF','GHI','JKL','MNO','PQRS','TUV','WXYZ','','+',''][i]}</small></button>)}</div>
+      <div className="dialrow"><span/><button className="dial" aria-label="拨打" disabled={!enabled||busy||!voice?.ready||!lines.some(l=>l.lineId===selected&&canDial(l))||!/^\+?\d{3,20}$/.test(number)} onClick={()=>void dial()}><PhoneIcon name="phone" size={34}/></button><button className={'backspace'+(!number?' empty':'')} aria-label="退格" disabled={!number} onPointerDown={deleteDown} onPointerUp={clearPress} onPointerCancel={clearPress} onPointerLeave={clearPress} onContextMenu={e=>e.preventDefault()} onClick={()=>{if(longPress.current){longPress.current=false;return}setNumber(number.slice(0,-1))}}><PhoneIcon name="delete" size={25}/></button></div>
+      <div className="dial-options"><details><summary>通话选项</summary><label className="switch-row"><span>切到后台时请求 Groundwire 接续</span><input type="checkbox" checked={auto} onChange={e=>{setAuto(e.target.checked);localStorage.setItem('phone.autoHandoff',String(e.target.checked))}}/></label><p className="hint">{!enabled?'本安装尚未获拨号授权':voice?.reason||(!voice?.ready?'正在检查语音网关':'语音网关就绪')}</p></details></div>
+      {call?.state==='CALL_ENDED'&&<p className="last-call">上一通电话已结束</p>}
+    </section>
+    }{error&&<p role="alert">{error}</p>}</>;
 }

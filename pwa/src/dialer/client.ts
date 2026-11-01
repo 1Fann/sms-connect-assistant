@@ -22,5 +22,5 @@ export type Line={lineId:string,deviceId:string,name:string,slot:number,lineOnli
 export type ContactSource={deviceId:string,rawId:string,contactId:string,revision:string|number,name:string,numbers:string[],readOnly:boolean};
 export type Contact={id:string,name:string,numbers:string[],revision:number,favorite:boolean,conflict:boolean,sources:ContactSource[]};
 export type CallRecord={id:string,deviceId?:string,number:string,name?:string,date:number,duration:number,type:string,accountId?:string};
-export type PbxCall={id:string,lineId:string,number:string,state:string,direction:string,created:number,answeredAt?:number,endedAt?:number,reason?:string,target?:string};
+export type PbxCall={id:string,lineId:string,number:string,state:string,direction:string,device?:string,created:number,answeredAt?:number,endedAt?:number,reason?:string,target?:string};
 export const err=(e:unknown)=>e instanceof Error?e.message:'操作未完成';

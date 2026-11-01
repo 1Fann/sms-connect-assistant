@@ -1,6 +1,6 @@
 # CommLink 0.9.0-dev · 升级与验收 / Upgrade and acceptance
 
-> 当前开发版为 **0.9.0-dev6 / 29**。电话已改为从拨号开始由 Groundwire 承载；以下旧 WebRTC / ARI 部署与验收记录是历史记录，不代表当前实现。现行配置见 [中文语音指南](VOICE.zh-CN.md)、[English voice guide](VOICE.en.md) 和 [dev6 说明](releases/0.9.0-dev6.md)。
+> 当前开发版为 **0.9.0-dev7 / 30**。电话已改为从拨号开始由 Groundwire 承载；以下旧 WebRTC / ARI 部署与验收记录是历史记录，不代表当前实现。现行配置见 [中文语音指南](VOICE.zh-CN.md)、[English voice guide](VOICE.en.md) 、[原生通话说明](releases/0.9.0-dev6.md) 和 [SIM 显示说明](releases/0.9.0-dev7.md)。
 
 ## 安装边界
 

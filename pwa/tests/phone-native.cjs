@@ -20,7 +20,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await context.route('**/api/**',route=>{
   const req=route.request(),url=new URL(req.url()),key=url.pathname.replace('/api/v2/','');
   if(req.method()!=='GET'){writes.push(key);return route.abort()}
-  const records=Array.from({length:15},(_,i)=>({id:'call-'+i,name:i%3===0?'演示联系人 '+(i+1):'',number:'55501'+String(i).padStart(2,'0'),deviceId:'server',type:i%4===1?'missed':i%2?'incoming':'outgoing',date:Date.now()-i*4000000,duration:i%4?45:0}));
+  const records=Array.from({length:15},(_,i)=>({id:'call-'+i,name:i%3===0?'演示联系人 '+(i+1):'',number:'55501'+String(i).padStart(2,'0'),deviceId:'server',slot:i%3===0?2:i%3===1?1:null,type:i%4===1?'missed':i%2?'incoming':'outgoing',date:Date.now()-i*4000000,duration:i%4?45:0}));
   const data={
    session:{installationId:installation,permissions:['calls.read','calls.dial','contacts.read']},
    devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · SIM 1',slot:1,lineOnline:true,online:true,confirmed:true}],
@@ -32,6 +32,10 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  });
  await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
  await page.getByRole('button',{name:'筛选通话'}).waitFor();
+ const callRows=page.locator('.call-row-main');
+ assert.ok((await callRows.nth(0).textContent()).includes('主机 · SIM 2 · 呼出'),await callRows.nth(0).textContent());
+ assert.ok((await callRows.nth(1).textContent()).includes('主机 · SIM 1 · 未接来电'),await callRows.nth(1).textContent());
+ assert.ok((await callRows.nth(2).textContent()).includes('主机 · SIM 未知 · 呼出'),await callRows.nth(2).textContent());
  await page.screenshot({path:path.join(out,'calls-light.png')});
  assert.equal(await page.locator('nav button').count(),3);
  await page.getByRole('button',{name:'筛选通话'}).click();
@@ -40,6 +44,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  assert.equal(await page.locator('.call-row-main').count(),4);
  await page.getByRole('button',{name:'筛选通话'}).click();await page.getByRole('menuitem',{name:'全部通话',exact:true}).click();
  await page.locator('.call-row-main').first().click();await page.locator('.contact-sheet').waitFor();await page.waitForTimeout(350);
+ await page.locator('.contact-sheet .history-entry').getByText('主机 · SIM 2',{exact:true}).waitFor();
  await page.screenshot({path:path.join(out,'poster.png')});
  await page.getByRole('button',{name:'返回',exact:true}).click();await page.waitForTimeout(280);
  const swipe=page.locator('.call-swipe-front').first(),box=await swipe.boundingBox();
@@ -76,6 +81,6 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.getByRole('button',{name:'取消搜索'}).click();await page.locator('nav button').filter({hasText:'联系人'}).click();await page.getByRole('button',{name:'演示联系人',exact:true}).waitFor();
  await page.screenshot({path:path.join(out,'contacts.png')});
  assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
- console.log('PASS Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
+ console.log('PASS call list/detail recorded SIMs and unknown slots, Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

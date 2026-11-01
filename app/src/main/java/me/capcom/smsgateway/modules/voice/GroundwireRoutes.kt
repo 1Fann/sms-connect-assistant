@@ -25,7 +25,7 @@ fun Route.groundwireRoutes(context:Context,owner:(ApplicationCall)->String,
             db.rawQuery("SELECT record FROM calls WHERE owner=? OR owner='' ORDER BY created DESC LIMIT 500",arrayOf(owner(call))).use{cursor->
                 buildList {while(cursor.moveToNext()){
                     val record=JSONObject(cursor.getString(0))
-                    if(deviceAllowed(call,record.optString("device")))add(listOf("id","lineId","device","number","state","created","endedAt","answeredAt","direction")
+                    if(deviceAllowed(call,record.optString("device")))add(listOf("id","lineId","device","slot","number","state","created","endedAt","answeredAt","direction")
                         .filter(record::has).associateWith{record.get(it)})
                 }}
             }

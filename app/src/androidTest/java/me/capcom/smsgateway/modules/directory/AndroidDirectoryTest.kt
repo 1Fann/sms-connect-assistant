@@ -48,6 +48,25 @@ class AndroidDirectoryTest {
   assertEquals("Second phone",s.resolveName(phone){it=="B"})
   assertEquals(a.getString("id"),cards{it=="A"}.first{it.getString("nativeContactId")=="5"}.getString("id"))
  }
+ @Test fun pageNameLookupPreservesExactMatchesAmbiguityAndDeviceRevocations(){
+  s.sync("A",packet(listOf(event(display="First phone"),event(raw="2",number="10086",display="Service"),
+   event(raw="3",number="Bank",display="Bank sender"))))
+  s.sync("B",packet(listOf(event(display="Other phone"),event(raw="2",number="10086",display="Other service"))))
+  s.sync("C",packet(listOf(event(display="Revoked")),read=false))
+  val requested=listOf(phone,"+1 (650) 253-0000","10086","Bank","bank","unknown","+442079460000",phone)
+  val scoped=s.resolveNames(requested){it=="A"}
+  assertEquals(requested.toSet(),scoped.keys)
+  assertEquals("First phone",scoped[phone]);assertEquals("First phone",scoped["+1 (650) 253-0000"])
+  assertEquals("Service",scoped["10086"]);assertEquals("Bank sender",scoped["Bank"])
+  assertNull(scoped["bank"]);assertNull(scoped["unknown"]);assertNull(scoped["+442079460000"])
+  val mixed=s.resolveNames(requested)
+  assertNull(mixed[phone]);assertNull(mixed["10086"]);assertEquals("Bank sender",mixed["Bank"])
+  s.sync("A",packet(read=false,write=false))
+  assertTrue(s.resolveNames(requested){it=="A"}.values.all{it==null})
+  val indexed=s.resolveNames(listOf(phone,"+442079460000")){it=="B"}
+  assertEquals("Other phone",indexed[phone]);assertNull(indexed["+442079460000"])
+  assertTrue(s.resolveNames(emptyList()).isEmpty())
+ }
  @Test fun nativeNumbersKeepAndroidOrderAcrossAccountsAndLegacySnapshots(){
   val first=listOf("5550188","5550101","5550166")
   val second=listOf("5550177","5550188","5550102")

@@ -259,7 +259,7 @@ class IphoneService : Service() {
                         val cursor=if(local.size<200 && remote.size<200)null else next(local)+"_"+next(remote,true)
                         call.respond(mapOf("items" to (local+remote).let { rows ->
                             val marks=store.scopedReadTimes(smsScope(call))
-                            val names=if(!call.attributes[smsGrant].allows("contacts.read"))emptyMap() else rows.map { it.address }.distinct().associateWith { runCatching { directory.resolveName(it){ d->allows(call,d) } }.getOrNull() }
+                            val names=if(!call.attributes[smsGrant].allows("contacts.read"))emptyMap() else runCatching { directory.resolveNames(rows.map { it.address }){ d->allows(call,d) } }.getOrDefault(emptyMap())
                             rows.map { r->r.copy(name=if(call.attributes[smsGrant].allows("contacts.read"))names[r.address]?:r.name else null, read=r.read || r.date<=(marks[r.address]?:0L)) }
                         }, "next" to cursor))
                     }

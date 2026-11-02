@@ -184,6 +184,9 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
     fun resolveName(number:String,allowedDevice:(String)->Boolean={true}):String? =
         AndroidDirectory(this).resolve(number,allowedDevice)
 
+    fun resolveNames(numbers:Collection<String>,allowedDevice:(String)->Boolean={true}):Map<String,String?> =
+        AndroidDirectory(this).resolveNames(numbers,allowedDevice)
+
     internal fun contactReadError(allowed:(String)->Boolean):String? =
         if(allowed("server")&&deviceAccess("server").optBoolean("contactsRead"))
             ctx.getSharedPreferences("directory-sync",0).getString("contact-error",null) else null

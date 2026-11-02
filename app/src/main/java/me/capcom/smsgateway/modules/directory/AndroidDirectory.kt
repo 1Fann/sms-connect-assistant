@@ -63,16 +63,35 @@ internal class AndroidDirectory(private val service:DirectoryService) {
    .sortedBy{it.getString("id")}.drop(offset).take(51).toList()
   return JSONObject().put("items",JSONArray(items.take(50))).put("next",if(items.size>50)offset+50 else JSONObject.NULL).put("syncError",service.contactReadError(allowed))
  }
- fun resolve(number:String,allowed:(String)->Boolean):String? {
-  val key=lookupKey(service.regionCode(),number)?:return null
-  val rows=if(key.startsWith("+"))db.rows("""SELECT DISTINCT s.device,s.payload FROM sources s
-   JOIN grants g ON g.device=s.device JOIN identities i ON i.device=s.device AND i.raw=s.raw
-   WHERE s.deleted=0 AND g.contacts=1 AND i.number=?""",key){it.getString(0) to it.getString(1)}
-   else db.rows("SELECT s.device,s.payload FROM sources s JOIN grants g ON g.device=s.device WHERE s.deleted=0 AND g.contacts=1"){it.getString(0) to it.getString(1)}
-  val names=rows.filter{allowed(it.first)}.map{JSONObject(it.second)}
-   .filter{it.getJSONArray("numbers").strings().any{n->lookupKey(service.regionCode(),n)==key}}
-   .map{it.optString("displayName",it.optString("name"))}.filter{it.isNotBlank()}.distinct()
-  return names.singleOrNull()
+ fun resolve(number:String,allowed:(String)->Boolean):String? = resolveNames(listOf(number),allowed)[number]
+ // One request-local lookup for a page, including exact short-code senders.
+ // No cross-session cache: revocations and contact edits apply on the next read.
+ fun resolveNames(numbers:Collection<String>,allowed:(String)->Boolean):Map<String,String?> {
+  val region=service.regionCode()
+  val keys=numbers.distinct().associateWith{lookupKey(region,it)}
+  val wanted=keys.values.filterNotNull().toSet()
+  if(wanted.isEmpty())return keys.mapValues{null}
+  val indexed=wanted.filter{it.startsWith("+")}
+  val rows=if(wanted.any{!it.startsWith("+")})
+   db.rows("SELECT s.device,s.payload FROM sources s JOIN grants g ON g.device=s.device WHERE s.deleted=0 AND g.contacts=1"){it.getString(0) to it.getString(1)}
+  else indexed.chunked(400).flatMap { chunk ->
+   val placeholders=chunk.joinToString(","){"?"}
+   db.rows("""SELECT DISTINCT s.device,s.payload FROM sources s
+    JOIN grants g ON g.device=s.device JOIN identities i ON i.device=s.device AND i.raw=s.raw
+    WHERE s.deleted=0 AND g.contacts=1 AND i.number IN ("""+placeholders+")",*chunk.toTypedArray()){it.getString(0) to it.getString(1)}
+  }
+  val names=mutableMapOf<String,MutableSet<String>>()
+  rows.forEach { (device,json) ->
+   if(!allowed(device))return@forEach
+   val payload=JSONObject(json)
+   val name=payload.optString("displayName",payload.optString("name"))
+   if(name.isBlank())return@forEach
+   payload.getJSONArray("numbers").strings().forEach { number ->
+    val key=lookupKey(region,number)
+    if(key!=null && key in wanted)names.getOrPut(key){linkedSetOf()}.add(name)
+   }
+  }
+  return keys.mapValues{(_,key)->names[key]?.singleOrNull()}
  }
  fun mutate(owner:String,action:String,body:JSONObject,allowed:(String)->Boolean):JSONObject = db.atomic {
   require(owner.isNotBlank()&&action in setOf("create","edit","favorite")&&body.optString("destination")=="android")

@@ -1,10 +1,40 @@
 // App-shell only. Never cache authenticated requests, SMS bodies or credentials.
 const CACHE = 'sms-shell-v10';
-self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(c => c.addAll(['/', '/manifest.webmanifest','/icon-192.png','/icon-512.png']))));
+// Publish an updated shell only after its versioned entry chunks are available.
+async function refreshShell(request, cache) {
+  const response=await fetch(request);
+  if(response.ok) {
+    try {
+      const html=await response.clone().text();
+      const assets=[...new Set([...html.matchAll(/(?:src|href)="(\/assets\/[^"]+\.(?:js|css))"/g)].map(m=>m[1]))];
+      await Promise.all(assets.map(async path=>{
+        const url=new URL(path,self.location.origin).href;
+        if(await cache.match(url))return;
+        const asset=await fetch(url);
+        if(!asset.ok)throw Error('Shell asset unavailable');
+        await cache.put(url,asset);
+      }));
+      await cache.put(new URL('/',self.location.origin).href,response.clone());
+    } catch { /* Keep the previous complete shell when an update is interrupted. */ }
+  }
+  return response;
+}
+self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(c => Promise.all([
+  refreshShell(new URL('/',self.location.origin).href,c),
+  c.addAll(['/manifest.webmanifest','/icon-192.png','/icon-512.png'])
+]))));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k=>k.startsWith('sms-shell-') && k!==CACHE).map(k=>caches.delete(k))))));
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if(url.origin !== self.location.origin || !(['/', '/index.html', '/manifest.webmanifest','/icon-192.png','/icon-512.png'].includes(url.pathname) || url.pathname.startsWith('/assets/')) || event.request.method !== 'GET') return;
+  if(url.pathname==='/' || url.pathname==='/index.html') {
+    const cache=caches.open(CACHE);
+    const update=cache.then(c=>refreshShell(event.request,c));
+    event.waitUntil(update.then(()=>{}).catch(()=>{}));
+    event.respondWith(cache.then(c=>c.match(new URL('/',self.location.origin).href))
+      .then(cached=>cached || update).catch(()=>Response.error()));
+    return;
+  }
   // Content-hashed assets have a new URL whenever their contents change.
   if (/^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(url.pathname)) {
     event.respondWith((async()=>{

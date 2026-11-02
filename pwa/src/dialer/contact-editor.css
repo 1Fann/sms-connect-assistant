@@ -131,6 +131,11 @@ body:has(.call-contact-editor) #root {
 }
 .ios-editor-keyboard-slot[inert] {pointer-events: none}
 .ios-editor-fields {display: flow-root; min-height: calc(100% + var(--preserved-scroll))}
+.ios-editor-scroll[data-hold-position] {overflow: clip}
+.ios-editor-scroll[data-hold-position] > .ios-editor-fields {
+  position: relative;
+  top: var(--held-fields-offset,0px);
+}
 .ios-editor-scroll::-webkit-scrollbar {display: none}
 .ios-editor-edit .ios-editor-scroll {padding-bottom: calc(env(safe-area-inset-bottom,0px) + 92px)}
 html[data-keyboard-open=true] .ios-editor .ios-editor-scroll,
@@ -196,7 +201,7 @@ body:has(.ios-editor-edit) {background-color: var(--editor-page)}
   border: none;
   border-radius: 24px;
   background: var(--editor-fill);
-  overflow: hidden;
+  overflow: clip;
   font-size: 17px;
 }
 .ios-editor label.ios-editor-name,

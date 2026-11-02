@@ -174,9 +174,31 @@ const server=http.createServer((req,res)=>{
  async function assertStill(before,stage){
    const after=await editorFrame();
    for(const key of Object.keys(before)){
+     // The visible content offset may be carried by a transform while the
+     // scroller is temporarily clipped. Native scrollTop need not match then.
+     if(key==='scroll'){
+       assert.equal(after.scroll[1],before.scroll[1],stage+' unexpectedly scrolled the document');
+       continue;
+     }
      assert.ok(before[key].every((value,index)=>Math.abs(value-after[key][index])<=1),
        stage+' moved '+key+' from '+JSON.stringify(before[key])+' to '+JSON.stringify(after[key]));
    }
+ }
+ async function assertNoTransientReveal(stage){
+   const frames=await editor.evaluate(form=>{
+     const panel=form.querySelector('.ios-editor-scroll');
+     const points=[form.querySelector('.ios-editor-toolbar'),form.querySelector('[data-editor-name]'),form.querySelector('[data-phone-id]')];
+     const read=()=>points.map(element=>element.getBoundingClientRect().top-window.fixtureVV.offsetTop);
+     const before=read();
+     // The viewport metrics do not change while WebKit is revealing a focused row.
+     // Read synchronously, before any scroll handler or rAF could repair a jump.
+     document.activeElement.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+     const afterReveal=read();
+     panel.scrollBy({top:panel.scrollTop>24?-24:24,behavior:'instant'});
+     return [before,afterReveal,read()];
+   });
+   for(const frame of frames.slice(1))assert.ok(frame.every((v,i)=>Math.abs(v-frames[0][i])<=1),
+     stage+' moved toolbar/name/phone within one frame: '+JSON.stringify(frames));
  }
  async function assertOneKeyboardInset(idlePadTop,stage){
    const {bottom,visible}=await editor.evaluate(form=>({
@@ -213,6 +235,7 @@ const server=http.createServer((req,res)=>{
  await nameField.evaluate(field=>{delete field.focus;field.removeAttribute('data-fixture-focus')});
  await viewport(620,12);
  await assertStill(shortFrame,'Opening the name keyboard');
+ await assertNoTransientReveal('Initial name keyboard');
  await keyboardGeometry(492,26,true);
  await assertStill(shortFrame,'Visible name keyboard');
  await keyboardGeometry(492,64,true);
@@ -245,13 +268,20 @@ const server=http.createServer((req,res)=>{
  assert.ok(await numberPad.isHidden(),'Name editing uses the iOS keyboard');
  // A browser focus reveal can scroll the overflow panel after its last viewport
  // notification. No wheel or touch gesture has asked to move these visible rows.
- await nameField.evaluate(field=>{
-   field.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
- });
+ await assertNoTransientReveal('Late native focus reveal');
  await assertStill(shortFrame,'Late native focus reveal with no further viewport change');
  // Users can scroll even a single-number form while the native keyboard is up.
  // A later viewport event must respect that scroll when the caret remains visible.
  const panel=editor.locator('.ios-editor-scroll');
+ const drag=await page.context().newCDPSession(page);
+ const bounds=await panel.boundingBox();
+ const start={x:bounds.x+6,y:bounds.y+Math.min(140,bounds.height*.65)};
+ await drag.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[start]});
+ for(const dy of [10,25,45])await drag.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:start.x,y:start.y-dy}]});
+ await page.waitForFunction(()=>document.querySelector('.ios-editor-scroll').scrollTop>5,null,{timeout:400});
+ await drag.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+ await drag.detach();
+ await panel.evaluate(el=>{el.scrollTop=0});
  await panel.hover();
  await page.mouse.wheel(0,24);
  await page.waitForFunction(()=>document.querySelector('.ios-editor-scroll').scrollTop>=23);
@@ -326,6 +356,7 @@ const server=http.createServer((req,res)=>{
  // The reverse handoff starts while the old native keyboard is still fully visible.
  // Then it shrinks through the web keypad's height. Never reserve both heights.
  await shortPhone.click();
+ await assertNoTransientReveal('Taking over from the native keyboard');
  await assertStill(shortFrame,'Phone focus before Safari starts hiding the native keyboard');
  await assertOneKeyboardInset(idlePadTop,'Native keyboard still fully open');
  await viewport(720,18);
@@ -379,6 +410,20 @@ const server=http.createServer((req,res)=>{
  await nameField.click();
  await keyboardGeometry(492,24,false);
  await assertStill(scrolledFrame,'Opening the keyboard on an already visible field in a scrolled form');
+ await assertNoTransientReveal('Already-scrolled long form');
+ // There is not enough room in this frame to preserve the old name position.
+ // Only the overlap and a small caret margin should be scrolled away.
+ await viewport(280,24);
+ await page.waitForFunction(()=>{
+   const form=document.querySelector('.ios-editor-edit');
+   const toolbar=form.querySelector('header').getBoundingClientRect();
+   const name=form.querySelector('[data-editor-name]').getBoundingClientRect();
+   const room=window.fixtureVV.offsetTop+window.fixtureVV.height-name.bottom;
+   return document.activeElement.matches('[data-editor-name]') && name.top>=toolbar.bottom && room>=0 && room<=16;
+ },null,{timeout:2500});
+ await assertNoTransientReveal('Only the obstructed portion moved');
+ await viewport(492,24);
+ await assertStill(scrolledFrame,'Reduced occlusion restores the original reading position');
  await editor.getByLabel('联系人电话号码',{exact:true}).click();
  await assertStill(scrolledFrame,'Switching a scrolled form while the native keyboard is open');
  await assertOneKeyboardInset(idlePadTop,'Scrolled name-to-phone handoff');

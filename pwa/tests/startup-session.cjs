@@ -11,10 +11,16 @@ const server=http.createServer((req,res)=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL||'msedge'});
  try{
-  for(const scenario of ['valid','expired','network']){
+  for(const scenario of ['valid','expired','network','empty']){
    const context=await browser.newContext({serviceWorkers:'block',viewport:{width:390,height:844}});
    await context.addInitScript(()=>{
-    window.pairAppeared=false;window.removedAppeared=false;
+    window.pairAppeared=false;window.removedAppeared=false;window.loadingAppeared=false;window.falseEmptyAppeared=false;
+    const observeStartup=()=>{
+     const text=document.body?.textContent||'';
+     if(text.includes('正在载入…'))window.loadingAppeared=true;
+     if(document.querySelector('.list-view > .empty')?.textContent.includes('还没有信息'))window.falseEmptyAppeared=true;
+    };
+    new MutationObserver(observeStartup).observe(document,{childList:true,subtree:true,characterData:true});
     new MutationObserver(()=>{if(document.querySelector('.pair'))window.pairAppeared=true;if(document.body?.textContent.includes('Removed fixture'))window.removedAppeared=true}).observe(document,{childList:true,subtree:true});
    });
    const requests=[];
@@ -29,6 +35,7 @@ const server=http.createServer((req,res)=>{
      if(session==='offline')status=503;else if(session==='expired')status=401;
      else data={items:[{id:'sms:1',address:'+15550100001',body:'Synthetic startup fixture',date:1,incoming:true,read:true,state:'received'}],next:null,conversations:[{address:'+16502530000',pinned:0,removedBefore:100,unread:false}]};
      if(status===200)data.items.push({id:'sms:2',address:'+16502530000',body:'Removed fixture',date:1,incoming:true,read:true,state:'received'});
+     if(scenario==='empty'&&status===200)data.items=[];
     }else if(key==='refresh')status=401;
     else if(session==='expired')status=401;
     else if(key==='history')data={items:[{id:'sms:1',address:'+15550100001',body:'Synthetic startup fixture',date:1,incoming:true,read:true,state:'received'}],next:null};
@@ -55,9 +62,12 @@ const server=http.createServer((req,res)=>{
      assert.equal(await page.getByText('Synthetic startup fixture',{exact:true}).count(),0);
      session='valid';await page.getByRole('button',{name:'重新连接',exact:true}).click();
     }
-    await page.getByText('Synthetic startup fixture',{exact:true}).waitFor();
+    if(scenario==='empty')await page.locator('.list-view > .empty').filter({hasText:'还没有信息'}).waitFor();
+    else await page.getByText('Synthetic startup fixture',{exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>window.pairAppeared),false,'Valid/retried sessions must never mount a pairing form');
     assert.equal(await page.evaluate(()=>window.removedAppeared),false,'Startup removal metadata must apply before rendering rows');
+    assert.equal(await page.evaluate(()=>window.loadingAppeared),false,'Startup must enter the prepared inbox without a second loading screen');
+    if(scenario!=='empty')assert.equal(await page.evaluate(()=>window.falseEmptyAppeared),false,'A populated inbox must not flash an empty state');
     session='expired';await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
     await page.getByLabel('安卓显示的配对码').waitFor();
     assert.equal(await page.getByText('Synthetic startup fixture',{exact:true}).count(),0);

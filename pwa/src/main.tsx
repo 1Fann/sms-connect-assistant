@@ -133,7 +133,14 @@ function App(){
   const metadata=history.then(data=>data.conversations??api<ConversationState[]>('conversations'));
   const initial={history,metadata};
   firstLoad.current=initial;
-  Promise.all([history,metadata]).then(()=>{if(alive)setPaired(true)}).catch(e=>{
+  Promise.all([history,metadata]).then(([data,states])=>{
+   if(!alive)return;
+   if(!Array.isArray(states))throw Error('会话状态暂不可用，请更新安卓应用后重试');
+   // Publish the prepared inbox and its access state in the same React update.
+   setRows(data.items);setCursor(data.next);
+   metadataRef.current=states;setConversationStates(states);setMetadataReady(true);
+   setPaired(true);
+  }).catch(e=>{
    if(firstLoad.current===initial)firstLoad.current=null;
    if(!alive)return;
    if(e instanceof ApiError&&e.status===401)setPaired(false);

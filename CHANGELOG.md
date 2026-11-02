@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev29 · 启动页面衔接
+
+- 首次实时响应完成后，在同一次界面更新中提交短信、会话状态与已授权状态，避免启动页之后再闪过“正在载入”或错误空列表。
+- Publish authenticated access, initial SMS and conversation metadata together, moving directly from the startup shell to the prepared inbox. Browser checks cover transient loading, populated/empty inboxes, expiry and network retry.
+
 ## 0.9.0-dev28 · 实时短信启动优化
 
 - 首次实时短信响应同时返回当前授权范围内的会话状态，合并启动鉴权、短信和会话状态请求。旧服务端不包含会话状态时仍兼容分开读取。

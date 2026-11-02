@@ -120,16 +120,8 @@ body:has(.call-contact-editor) #root {
   padding: 0 var(--editor-side) calc(env(safe-area-inset-bottom,0px) + 22px);
   scroll-padding-block: 12px;
 }
-/* Both keyboards occupy the same bottom edge. A native keyboard in flight
-   and the web number pad must reserve the larger of their heights, only once. */
-.ios-editor-keyboard-slot {
-  flex: none;
-  min-height: var(--phone-keyboard,0px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-.ios-editor-keyboard-slot[inert] {pointer-events: none}
+/* Reserve only the part of the editor covered by the system keyboard. */
+.ios-editor-keyboard-slot {flex: none; min-height: var(--phone-keyboard,0px)}
 .ios-editor-fields {display: flow-root; min-height: calc(100% + var(--preserved-scroll))}
 .ios-editor-scroll[data-hold-position] {overflow: clip}
 .ios-editor-scroll[data-hold-position] > .ios-editor-fields {
@@ -138,15 +130,13 @@ body:has(.call-contact-editor) #root {
 }
 .ios-editor-scroll::-webkit-scrollbar {display: none}
 .ios-editor-edit .ios-editor-scroll {padding-bottom: calc(env(safe-area-inset-bottom,0px) + 92px)}
-html[data-keyboard-open=true] .ios-editor .ios-editor-scroll,
-.ios-editor[data-phone-pad=true] .ios-editor-scroll {padding-bottom: 12px}
+html[data-keyboard-open=true] .ios-editor .ios-editor-scroll {padding-bottom: 12px}
 /* The editor's navigation stays parked at its normal bottom edge, including
    the frames between native keyboard dismissal and the dock becoming visible. */
 #root:has(> .ios-editor-edit) > .phone-dock,
 #root[data-contact-dock-hidden] > .phone-dock {--phone-keyboard: 0px; transition: none}
 #root[data-contact-dock-hidden] > .phone-dock,
 html[data-keyboard-open=true] #root:has(> .ios-editor-edit) .phone-dock,
-#root:has(> .ios-editor-edit[data-phone-pad=true]) .phone-dock,
 #root:has(> .ios-editor-edit) .directory-poster[inert] {visibility: hidden}
 html:has(.ios-editor-edit),
 body:has(.ios-editor-edit) {background-color: var(--editor-page)}

@@ -5,7 +5,6 @@ import {PhoneAvatar, PhoneIcon} from './PhoneIcon';
 import {formatPhone, identity} from '../phone';
 import {sectionContacts} from './contactSections';
 import {primarySource, createAndroidContact, editAndroidContact, appendAndroidNumber, checkAndroidWrite, type AndroidWrite} from './androidContacts';
-import {PhoneNumberPad} from './PhoneNumberPad';
 import {useContactEditorViewport} from './contactEditorViewport';
 import './contact-editor.css';
 
@@ -33,11 +32,8 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     return values.map(value => ({id: ++serial.current, value}));
   }
   const [phones, setPhones] = useState(() => draftNumbers(initialSource?.numbers || (number ? [number] : [])));
-  const [padTarget,setPadTarget]=useState<number|'handoff'|null>(null);
-  const padRow=typeof padTarget==='number'?padTarget:null;
-  const handingOff=padTarget==='handoff';
   const keyboardSlot=useRef<HTMLDivElement>(null);
-  const blankTap=useRef<{x:number,y:number,at:number}|null>(null);
+  const blankTap=useRef<{field:HTMLInputElement,x:number,y:number,at:number}|null>(null);
   const [removeId, setRemoveId] = useState<number | null>(null);
   const [raw, setRaw] = useState(initialSource?.rawId || '');
   const writableDevices = devices.filter(device => device.contactsWrite === true);
@@ -94,24 +90,6 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     };
   }, [editPage, mode]);
 
-  useLayoutEffect(()=>{
-    if(!handingOff)return;
-    const slot=keyboardSlot.current;
-    const pad=slot?.querySelector<HTMLElement>('.phone-number-pad');
-    if(!slot||!pad)return;
-    const finish=()=>setPadTarget(current=>current==='handoff'?null:current);
-    const check=()=>{
-      // Use the inset already applied by the viewport hook. Removing the old keys
-      // before that layout update would briefly give the entire screen to the form.
-      if(parseFloat(getComputedStyle(slot).minHeight)>=pad.offsetHeight-2)finish();
-    };
-    const viewportUpdates=new MutationObserver(check);
-    viewportUpdates.observe(document.documentElement,{attributes:true,attributeFilter:['style']});
-    const timeout=window.setTimeout(finish,750); // Hardware keyboards may never resize the viewport.
-    check();
-    return ()=>{viewportUpdates.disconnect();window.clearTimeout(timeout)};
-  },[handingOff]);
-
   useContactEditorViewport(dialog,keyboardSlot,step);
 
   useEffect(() => {
@@ -150,7 +128,6 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
 
   function sourceChange(value: string, card = selected) {
     const chosen = card?.sources.find(item => item.rawId === value);
-    setPadTarget(null);
     setRaw(value);
     setName(chosen?.name || '');
     setPhones(draftNumbers(chosen?.numbers || []));
@@ -181,27 +158,8 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
   function updatePhone(id:number,value:string) {
     setPhones(previous=>previous.map(row=>row.id===id?{...row,value}:row));
   }
-  function padInput() {
-    return padRow===null?null:dialog.current?.querySelector<HTMLInputElement>('[data-phone-id="'+padRow+'"]');
-  }
-  function typeOnPad(insert:string) {
-    const input=padInput();
-    if(!input||padRow===null||frozen)return;
-    const end=input.selectionEnd??input.value.length;
-    let start=input.selectionStart??end;
-    if(insert===''&&start===end)start=Math.max(0,start-1);
-    const value=input.value.slice(0,start)+insert+input.value.slice(end);
-    if(value.length>input.maxLength)return;
-    flushSync(()=>updatePhone(padRow,value));
-    input.setSelectionRange(start+insert.length,start+insert.length);
-  }
-  function dismissPad() {
-    padInput()?.blur();
-    setPadTarget(null);
-  }
   async function save() {
     if (lock.current || (!submitted && (!valid || !validData)) || step === 'choose') return;
-    setPadTarget(null);
     lock.current = true; setBusy(true); setError(''); setStatus('');
     try {
       if (!pending.current) {
@@ -249,10 +207,11 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
   return createPortal(<>
     {sheet && <div className="ios-editor-backdrop" aria-hidden="true" />}
     <section ref={dialog} className={'call-contact-editor ios-editor ' + (sheet ? 'ios-editor-sheet' : 'ios-editor-edit')}
-      data-phone-pad={padTarget!==null&&!frozen?'true':undefined}
       onPointerDownCapture={event=>{
-        blankTap.current=padRow!==null && event.isPrimary && event.button===0 && isEditorBackground(event.target)
-          ? {x:event.clientX,y:event.clientY,at:event.timeStamp} : null;
+        const field=document.activeElement;
+        blankTap.current=field instanceof HTMLInputElement && event.currentTarget.contains(field) &&
+          event.isPrimary && event.button===0 && isEditorBackground(event.target)
+          ? {field,x:event.clientX,y:event.clientY,at:event.timeStamp} : null;
       }}
       onPointerMoveCapture={event=>{
         const start=blankTap.current;
@@ -264,21 +223,15 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
         blankTap.current=null;
         // Handle the completed tap, after hit testing. Removing the keyboard on
         // touch-down could scroll the form or put a different control under the finger.
-        if(start && padRow!==null && !event.defaultPrevented && event.detail>0 && isEditorBackground(event.target)
-          && event.timeStamp-start.at<=500 && Math.hypot(event.clientX-start.x,event.clientY-start.y)<=8)dismissPad();
-      }}
-      onFocusCapture={event=>{
-        const field=event.target as HTMLElement;
-        if(field.matches('[data-editor-name]')){
-          setPadTarget(current=>current===null?null:'handoff');
-        }else if(!field.closest('[data-phone-id],.phone-number-pad'))setPadTarget(null);
-      }}
-      onBlurCapture={event=>{
-        if((event.target as HTMLElement).matches('[data-editor-name]'))
-          setPadTarget(current=>current==='handoff'?null:current);
+        if(start && document.activeElement===start.field && !event.defaultPrevented && event.detail>0 &&
+          isEditorBackground(event.target) && event.timeStamp-start.at<=500 &&
+          Math.hypot(event.clientX-start.x,event.clientY-start.y)<=8)start.field.blur();
       }}
       role="dialog" aria-modal={sheet} aria-label={title} onKeyDown={event => {
-        if(event.key==='Escape'&&padRow!==null){event.preventDefault();dismissPad();return}
+        if(event.nativeEvent.isComposing)return;
+        if(event.key==='Escape' && event.target instanceof HTMLInputElement && event.target.type==='tel'){
+          event.preventDefault();event.target.blur();return;
+        }
         if (event.key === 'Escape') {event.preventDefault(); back(); return}
         if (!sheet || event.key !== 'Tab') return;
         const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled)')];
@@ -344,14 +297,13 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
                 <button className="ios-phone-remove" aria-label={'移除第 ' + (index + 1) + ' 个电话号码'} disabled={frozen}
                   aria-expanded={removeId === id} onClick={() => setRemoveId(removeId === id ? null : id)}><span aria-hidden="true">−</span></button>
                 <span className="ios-phone-label">电话</span>
-                <input type="text" inputMode="none" aria-label={index ? '联系人电话号码 ' + (index + 1) : '联系人电话号码'} data-phone-id={id}
+                <input type="tel" inputMode="tel" enterKeyHint="done" aria-label={index ? '联系人电话号码 ' + (index + 1) : '联系人电话号码'} data-phone-id={id}
                   autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
                   placeholder="电话号码" maxLength={96} readOnly={frozen} value={value}
-                  onFocus={()=>{if(!frozen)setPadTarget(id);setRemoveId(null)}} onClick={()=>{if(!frozen)setPadTarget(id)}}
-                  onKeyDown={event=>{if(event.key==='Enter'&&padRow===id){event.preventDefault();dismissPad()}}}
+                  onFocus={()=>setRemoveId(null)}
+                  onKeyDown={event=>{if(event.key==='Enter'&&!event.nativeEvent.isComposing){event.preventDefault();event.currentTarget.blur()}}}
                   onChange={event=>updatePhone(id,event.target.value)} />
                 {removeId === id && <button className="ios-phone-delete" disabled={frozen} onClick={() => {
-                  if(padRow===id)setPadTarget(null);
                   setPhones(previous => previous.filter(row => row.id !== id)); setRemoveId(null);
                 }}>删除</button>}
               </div>)}
@@ -375,9 +327,7 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
         {status && <p role="status">{status}</p>}
         {error && <p role="alert">{error}</p>}
       </div></div>
-      <div className="ios-editor-keyboard-slot" ref={keyboardSlot} inert={handingOff} aria-hidden={handingOff||undefined}>
-        {padTarget!==null&&!frozen&&form&&<PhoneNumberPad onInsert={typeOnPad} onDelete={()=>typeOnPad('')} onDismiss={dismissPad}/>}
-      </div>
+      <div className="ios-editor-keyboard-slot" ref={keyboardSlot} aria-hidden="true"/>
     </section>
   </>, portal);
 }

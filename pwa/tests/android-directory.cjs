@@ -60,14 +60,18 @@ const server=http.createServer((req,res)=>{
  assert.equal(await sheet.getByLabel('姓名',{exact:true}).evaluate(input=>input===document.activeElement),true,'New contact should focus its name field');
  await page.getByLabel('姓名',{exact:true}).fill('新联系人');
  await page.getByRole('button',{name:'添加电话',exact:true}).click();
- assert.equal(await sheet.getByLabel('联系人电话号码',{exact:true}).evaluate(input=>input===document.activeElement),true,'Adding a number focuses the new telephone row');
- await page.getByLabel('联系人电话号码').fill('5550300');
+ const phoneField=sheet.getByLabel('联系人电话号码',{exact:true});
+ assert.ok(await phoneField.evaluate(input=>input===document.activeElement&&input.type==='tel'&&['','tel'].includes(input.inputMode)),
+   'Adding a number focuses a field that requests the system telephone keyboard');
+ const internationalNumber='+1 (202) 555-0134,*9#';
+ await phoneField.fill(internationalNumber);
  assert.equal(await page.getByLabel('保存到安卓手机').inputValue(),'');
  assert.ok(await page.getByRole('button',{name:'完成',exact:true}).isDisabled());
  await page.getByLabel('保存到安卓手机').selectOption('B');
  await page.getByRole('button',{name:'完成',exact:true}).click();
  await page.getByRole('status').filter({hasText:'正在等待手机确认写入'}).waitFor();
  assert.ok(reads>0);assert.equal(mutations.length,1);
+ assert.deepEqual(mutations[0].numbers,[internationalNumber]);
  assert.equal(await page.getByText('已写入安卓通讯录，列表将自动同步。',{exact:true}).count(),0);
  assert.ok(await page.getByRole('dialog',{name:'新建联系人',exact:true}).isVisible());
  state='done';

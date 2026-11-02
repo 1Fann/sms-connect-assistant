@@ -20,6 +20,10 @@ type Props = {
 };
 type PhoneDraft = {id: number, value: string};
 
+function isEditorBackground(target:EventTarget|null) {
+  return target instanceof Element && !target.closest('button,input,select,textarea,label,a,[contenteditable],.ios-editor-keyboard-slot');
+}
+
 export function CallContactEditor({number = '', mode, contact, devices, onClose, onSaved}: Props) {
   const initialSource = contact ? primarySource(contact) : undefined;
   const [step, setStep] = useState<EditorMode | 'append'>(mode);
@@ -33,6 +37,7 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
   const padRow=typeof padTarget==='number'?padTarget:null;
   const handingOff=padTarget==='handoff';
   const keyboardSlot=useRef<HTMLDivElement>(null);
+  const blankTap=useRef<{x:number,y:number,at:number}|null>(null);
   const [removeId, setRemoveId] = useState<number | null>(null);
   const [raw, setRaw] = useState(initialSource?.rawId || '');
   const writableDevices = devices.filter(device => device.contactsWrite === true);
@@ -245,6 +250,23 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     {sheet && <div className="ios-editor-backdrop" aria-hidden="true" />}
     <section ref={dialog} className={'call-contact-editor ios-editor ' + (sheet ? 'ios-editor-sheet' : 'ios-editor-edit')}
       data-phone-pad={padTarget!==null&&!frozen?'true':undefined}
+      onPointerDownCapture={event=>{
+        blankTap.current=padRow!==null && event.isPrimary && event.button===0 && isEditorBackground(event.target)
+          ? {x:event.clientX,y:event.clientY,at:event.timeStamp} : null;
+      }}
+      onPointerMoveCapture={event=>{
+        const start=blankTap.current;
+        if(start && Math.hypot(event.clientX-start.x,event.clientY-start.y)>8)blankTap.current=null;
+      }}
+      onPointerCancelCapture={()=>{blankTap.current=null}}
+      onClick={event=>{
+        const start=blankTap.current;
+        blankTap.current=null;
+        // Handle the completed tap, after hit testing. Removing the keyboard on
+        // touch-down could scroll the form or put a different control under the finger.
+        if(start && padRow!==null && !event.defaultPrevented && event.detail>0 && isEditorBackground(event.target)
+          && event.timeStamp-start.at<=500 && Math.hypot(event.clientX-start.x,event.clientY-start.y)<=8)dismissPad();
+      }}
       onFocusCapture={event=>{
         const field=event.target as HTMLElement;
         if(field.matches('[data-editor-name]')){

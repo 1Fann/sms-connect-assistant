@@ -1,5 +1,54 @@
 import {useLayoutEffect,type RefObject} from 'react';
 
+/** Owned by the phone shell so a save/cancel during dismissal cannot reveal its dock early. */
+export function useContactEditorDock() {
+  useLayoutEffect(()=>{
+    const shell=document.getElementById('root');
+    if(!shell)return;
+    const html=document.documentElement,viewport=window.visualViewport;
+    let timer=0,fullHeight=0;
+    const clear=()=>shell.removeAttribute('data-contact-dock-hidden');
+    function atRest() {
+      if(html.dataset.keyboardOpen==='true')return false;
+      if(!viewport || Math.abs(viewport.scale-1)>.01)return true;
+      const available=Math.min(fullHeight,Math.max(html.clientHeight,window.innerHeight));
+      return viewport.height>=available-2 && Math.abs(viewport.offsetTop)<=2 &&
+        Math.abs(viewport.pageTop-window.scrollY)<=2;
+    }
+    function update() {
+      if(!shell)return;
+      const open=html.dataset.keyboardOpen==='true';
+      if(!shell.hasAttribute('data-contact-dock-hidden')){
+        if(!open || !document.querySelector('.call-contact-editor'))return;
+        fullHeight=parseFloat(html.style.getPropertyValue('--height')) || window.innerHeight;
+        shell.setAttribute('data-contact-dock-hidden','');
+      }
+      window.clearTimeout(timer);
+      if(document.activeElement?.closest('.phone-dock')){clear();return}
+      if(open)return;
+      // Safari can restore the height before it restores the pan, or briefly
+      // report both as zero mid-animation. Restart the quiet interval on each change.
+      timer=window.setTimeout(()=>{if(atRest())clear()},200);
+    }
+    const state=new MutationObserver(update);
+    state.observe(html,{attributes:true,attributeFilter:['data-keyboard-open']});
+    viewport?.addEventListener('resize',update);
+    viewport?.addEventListener('scroll',update);
+    window.addEventListener('scroll',update,{passive:true});
+    window.addEventListener('pageshow',update);
+    document.addEventListener('focusin',update);
+    update();
+    return ()=>{
+      window.clearTimeout(timer);state.disconnect();clear();
+      viewport?.removeEventListener('resize',update);
+      viewport?.removeEventListener('scroll',update);
+      window.removeEventListener('scroll',update);
+      window.removeEventListener('pageshow',update);
+      document.removeEventListener('focusin',update);
+    };
+  },[]);
+}
+
 /** Coordinate native focus, keyboard occlusion and this editor's single scroll area. */
 export function useContactEditorViewport(dialog:RefObject<HTMLElement|null>,keyboardSlot:RefObject<HTMLDivElement|null>,step:string) {
   useLayoutEffect(() => {

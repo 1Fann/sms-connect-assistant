@@ -17,7 +17,7 @@ const server=http.createServer((req,res)=>{
  page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{
    const viewport=Object.assign(new EventTarget(),{height:844,width:390,offsetTop:0,scale:1});
-   Object.defineProperty(viewport,'pageTop',{get:()=>window.scrollY+viewport.offsetTop});
+   Object.defineProperty(viewport,'pageTop',{get:()=>window.scrollY+viewport.offsetTop+(viewport.pageLag||0)});
    Object.defineProperty(window,'visualViewport',{get:()=>viewport});
    window.fixtureVV=viewport;
  });
@@ -210,6 +210,38 @@ const server=http.createServer((req,res)=>{
  }
  await sheet.getByRole('button',{name:'编辑',exact:true}).click();
  const shortFrame=await editorFrame();
+ const restingDockBottom=await page.locator('.phone-dock').evaluate(dock=>dock.getBoundingClientRect().bottom);
+ async function assertDockDismissal(slowReturn=false){
+  const dockFrames=await page.evaluate(async slowReturn=>{
+   const dock=document.querySelector('.phone-dock');
+   const frames=[];
+   // A restored height is not enough: the viewport can still be panned, and can
+   // briefly report a closed keyboard before the last dismissal frames arrive.
+   for(const [phase,height,offsetTop,pageLag,count] of [
+     ['still panned',844,26,0,3],['page origin lag',844,0,26,6],['transient rest',844,0,0,3],
+     ['rebound',760,16,0,3],['settled',844,0,0,72]
+   ]){
+     Object.assign(window.fixtureVV,{height,offsetTop,pageLag});
+     window.fixtureVV.dispatchEvent(new Event('resize'));
+     window.fixtureVV.dispatchEvent(new Event('scroll'));
+     const start=performance.now();
+     for(let i=0;i<count || (phase==='still panned'&&slowReturn&&performance.now()-start<900);i++){
+       await new Promise(requestAnimationFrame);
+       if(dock.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})){
+         frames.push({phase,bottom:dock.getBoundingClientRect().bottom-offsetTop});
+       }
+     }
+   }
+   return frames;
+  },slowReturn);
+ assert.ok(dockFrames.length>0,'Navigation must return after the native keyboard closes');
+ const flash=dockFrames.find(frame=>frame.phase!=='settled'||Math.abs(frame.bottom-restingDockBottom)>1);
+ assert.ok(!flash,'Navigation appeared before it was safely at the screen bottom: '+JSON.stringify({flash,restingDockBottom}));
+ assert.ok(await page.locator('.phone-dock nav button').first().evaluate(button=>{
+   const r=button.getBoundingClientRect();
+   return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));
+ }),'Restored navigation must accept taps at its resting position');
+ }
  const nameField=editor.getByLabel('姓名',{exact:true});
  // Inspect the real touch focus timing. Dragging over an unfocused field is a
  // scroll gesture; only a completed tap should request focus without scrolling.
@@ -293,6 +325,7 @@ const server=http.createServer((req,res)=>{
  await nameField.blur();
  await viewport(620,16);
  await assertStill(shortFrame,'Dismissing the name keyboard');
+ await assertDockDismissal();
  await viewport(844,0);
  await assertStill(shortFrame,'Dismissed name keyboard');
  const shortPhone=editor.getByLabel('联系人电话号码',{exact:true});
@@ -315,6 +348,35 @@ const server=http.createServer((req,res)=>{
  await padKey('退格').click();
  const shortened=replaced.slice(0,1)+replaced.slice(3);
  assert.equal(await shortPhone.inputValue(),shortened);
+ // A short tap in the form margin dismisses the web keypad, preserves the draft,
+ // and leaves the editor open. Verify the coordinate actually hits blank space.
+ const blankPoint=await panel.evaluate(surface=>{
+   const bounds=surface.getBoundingClientRect();
+   const x=bounds.left+6,y=bounds.top+Math.min(80,bounds.height/2);
+   if(document.elementFromPoint(x,y)!==surface)throw Error('Expected to tap the blank editor margin');
+   return {x,y};
+ });
+ const gestures=await page.context().newCDPSession(page);
+ await gestures.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[blankPoint]});
+ for(const dy of [10,24,42])await gestures.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:blankPoint.x,y:blankPoint.y-dy}]});
+ await gestures.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ assert.ok(await numberPad.isVisible(),'A swipe over blank space must leave the keypad open');
+ await gestures.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[blankPoint]});
+ await new Promise(resolve=>setTimeout(resolve,650));
+ await gestures.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ assert.ok(await numberPad.isVisible(),'A long press on the background must not dismiss the keypad');
+ await gestures.detach();
+ await page.touchscreen.tap(blankPoint.x,blankPoint.y);
+ assert.ok(await numberPad.isHidden(),'Tapping blank space should dismiss the number keypad');
+ assert.equal(await shortPhone.evaluate(field=>document.activeElement===field),false);
+ assert.equal(await shortPhone.inputValue(),shortened);
+ assert.ok(await editor.isVisible());
+ await shortPhone.tap();
+ await numberPad.waitFor();
+ await editor.locator('.ios-editor-caption').filter({hasText:'保存后'}).tap();
+ assert.ok(await numberPad.isHidden(),'Tapping the static note below the fields should dismiss the keypad');
+ await shortPhone.tap();
+ await numberPad.waitFor();
  await setSelection(shortPhone,0);
  await padKey('切换到符号键盘').click();
  for(const key of ['加号','星号','井号'])await padKey(key).click();
@@ -398,8 +460,14 @@ const server=http.createServer((req,res)=>{
  await editor.locator('.phone-number-pad').waitFor({state:'hidden',timeout:2500});
  await assertStill(endFrame,'Shorter native keyboard after scrolling to the end');
  await nameField.blur();
- await viewport(844,0);
+ await viewport(730,12);
+ // Cancel while Safari's keyboard is still going down: the editing surface
+ // unmounts, but the dock must stay hidden throughout the remaining animation.
  await editor.getByRole('button',{name:'取消',exact:true}).click();
+ await editor.waitFor({state:'hidden'});
+ assert.ok(await page.locator('.phone-dock').isHidden(),'Exiting an editor mid-dismissal must not reveal navigation');
+ await assertDockDismissal(true);
+ await viewport(844,0);
  await sheet.getByRole('button',{name:'返回',exact:true}).click();
  await sheet.waitFor({state:'hidden'});
  await openCard(longCard.name);
@@ -511,7 +579,7 @@ const server=http.createServer((req,res)=>{
  await editor.getByLabel('姓名',{exact:true}).fill('合成备注');
  await editor.getByRole('button',{name:'添加电话',exact:true}).click();
  await editor.getByLabel('联系人电话号码 3',{exact:true}).fill('5550102');
- await padKey('收起键盘').click();
+ assert.ok(await numberPad.isVisible());
  await page.getByRole('button',{name:'完成',exact:true}).click();
  await editor.waitFor({state:'hidden'});
  assert.equal(writes.length,1);assert.equal(writes[0][0],'contacts/native/edit');assert.equal(writes[0][1].deviceId,'server');assert.equal(writes[0][1].rawId,'raw');assert.equal('targets' in writes[0][1],false);

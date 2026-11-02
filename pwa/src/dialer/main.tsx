@@ -7,6 +7,7 @@ import {PhoneIcon} from './PhoneIcon';
 import {api,request,PhoneError,err,type Session,type Device,type Line} from './client';
 import './phone.css';
 import {useViewport} from '../viewport';
+import {useContactEditorDock} from './contactEditorViewport';
 import {useMissedBadge} from './missedBadge';
 
 async function enablePush(){
@@ -19,6 +20,7 @@ async function enablePush(){
 }
 function App(){
  useViewport();
+ useContactEditorDock();
  const [searching,setSearching]=useState(false),[query,setQuery]=useState('');
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
  const [tab,setTab]=useState(()=>location.hash==='#missed'?'最近通话':'拨号键盘'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');

@@ -140,6 +140,11 @@ body:has(.call-contact-editor) #root {
 .ios-editor-edit .ios-editor-scroll {padding-bottom: calc(env(safe-area-inset-bottom,0px) + 92px)}
 html[data-keyboard-open=true] .ios-editor .ios-editor-scroll,
 .ios-editor[data-phone-pad=true] .ios-editor-scroll {padding-bottom: 12px}
+/* The editor's navigation stays parked at its normal bottom edge, including
+   the frames between native keyboard dismissal and the dock becoming visible. */
+#root:has(> .ios-editor-edit) > .phone-dock,
+#root[data-contact-dock-hidden] > .phone-dock {--phone-keyboard: 0px; transition: none}
+#root[data-contact-dock-hidden] > .phone-dock,
 html[data-keyboard-open=true] #root:has(> .ios-editor-edit) .phone-dock,
 #root:has(> .ios-editor-edit[data-phone-pad=true]) .phone-dock,
 #root:has(> .ios-editor-edit) .directory-poster[inert] {visibility: hidden}

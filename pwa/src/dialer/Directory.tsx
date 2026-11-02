@@ -4,92 +4,51 @@ import {PhoneIcon,PhoneAvatar} from './PhoneIcon';
 import {DetailSheet} from './DetailSheet';
 import {formatPhone} from '../phone';
 import {sectionContacts} from './contactSections';
-import {ContactImport} from './ContactImport';
-type Target={deviceId:string,rawId?:string,revision?:string|number,action:'create'|'update'|'delete'};
-type Job={id:string,deviceId:string,action:string,state:string,detail:string};
-const states:Record<string,string>={queued:'等待目标设备',done:'已写入',conflict:'来源有冲突',denied:'目标拒绝',failed:'失败',revoked:'设备已撤销'};
+import {CallContactEditor} from './CallContactEditor';
+import {writableContact} from './androidContacts';
+
 export function Directory({devices,canEdit,favorites,dial,lines,searchQuery,settings,allContacts}:{devices:Device[],canEdit:boolean,favorites:boolean,dial:(n:string,id?:string)=>void,lines:Line[],searchQuery?:string,settings:()=>void,allContacts:()=>void}){
- const [importing,setImporting]=useState(false),[importNotice,setImportNotice]=useState('');
- useEffect(()=>{if(searchQuery!==undefined){setQuery(searchQuery);setOffset(0)}},[searchQuery]);
  const [rows,setRows]=useState<Contact[]>([]),[selected,setSelected]=useState<Contact|null>(null),[query,setQuery]=useState('');
- const [editing,setEditing]=useState(false),[name,setName]=useState(''),[numbers,setNumbers]=useState(''),[targets,setTargets]=useState<Target[]>([]);
- const [error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,bump]=useState(0),[next,setNext]=useState<number|null>(null),[offset,setOffset]=useState(0);
- const [trash,setTrash]=useState(false),[other,setOther]=useState(''),[jobs,setJobs]=useState<Job[]>([]);
- const [defaultLine,setDefaultLine]=useState('');
- const [mergeQuery,setMergeQuery]=useState(''),[mergeResults,setMergeResults]=useState<Contact[]>([]);
- const [preferred,setPreferred]=useState(''),[updateGlobal,setUpdateGlobal]=useState(false);
- const [writeName,setWriteName]=useState(true),[writeNumbers,setWriteNumbers]=useState(false);
- const intent=useRef<{key:string,id:string}|null>(null),lock=useRef(false);
- const reload=()=>{setOffset(0);bump(v=>v+1)};
+ const [editor,setEditor]=useState<'create'|'edit'|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [next,setNext]=useState<number|null>(null),[offset,setOffset]=useState(0),[refresh,bump]=useState(0),[defaultLine,setDefaultLine]=useState('');
+ const favoriteIntent=useRef<{key:string,id:string}|null>(null),lock=useRef(false);
+ const [busy,setBusy]=useState(false);
+ useEffect(()=>{setQuery(searchQuery||'');setOffset(0)},[searchQuery]);
+ const reload=()=>{setOffset(0);bump(value=>value+1)};
  useEffect(()=>{
-   if(editing||selected||offset!==0)return;
-   const timer=setInterval(()=>{if(!document.hidden)bump(v=>v+1)},15000);
-   return()=>clearInterval(timer)
- },[editing,selected,offset]);
+  let active=true;const timer=setTimeout(()=>{api<{items:Contact[],next:number|null}>('contacts?q='+encodeURIComponent(query)+'&offset='+offset+(favorites?'&favorite=true':''))
+   .then(page=>{if(active){setRows(previous=>offset?[...previous,...page.items]:page.items);setNext(page.next);setError('')}}).catch(e=>{if(active)setError(err(e))})},150);
+  return()=>{active=false;clearTimeout(timer)}
+ },[query,offset,refresh,favorites]);
+ useEffect(()=>{if(editor)return;const timer=setInterval(()=>{if(!document.hidden&&offset===0)bump(v=>v+1)},15000);return()=>clearInterval(timer)},[editor,offset]);
  useEffect(()=>{
-   let active=true;const t=setTimeout(()=>{api<{items:Contact[],next:number|null}>('contacts?q='+encodeURIComponent(query)+'&offset='+offset+(trash?'&deleted=true':'')+(favorites?'&favorite=true':''))
-     .then(r=>{if(active){setRows(prev=>offset?[...prev,...r.items]:r.items);setNext(r.next)}}).catch(e=>{if(active)setError(err(e))})},150);
-   return()=>{active=false;clearTimeout(t)};
- },[query,offset,trash,refresh,favorites]);
- useEffect(()=>{if(!selected){setJobs([]);return}
-   setDefaultLine(localStorage.getItem('phone.line.'+selected.id)||'');
-   setJobs([]);if(!canEdit)return;
-   let active=true;async function load(){try{const data=await api<{items:Job[]}>('contact-sync/jobs?contactId='+encodeURIComponent(selected!.id));if(active)setJobs(data.items)}catch(e){if(active)setError(err(e))}}
-   void load();const t=setInterval(()=>{if(!document.hidden)void load()},5000);return()=>{active=false;clearInterval(t)};
- },[selected,canEdit]);
- useEffect(()=>{
-   if(!selected||!mergeQuery.trim()){setMergeResults([]);return}
-   let valid=true;const timer=setTimeout(()=>{api<{items:Contact[]}>('contacts?q='+encodeURIComponent(mergeQuery.trim())).then(r=>{
-     if(valid)setMergeResults(r.items.filter(c=>c.id!==selected.id))
-   }).catch(e=>{if(valid)setError(err(e))})},180);
-   return()=>{valid=false;clearTimeout(timer)}
- },[selected,mergeQuery]);
- const deviceName=(id:string)=>devices.find(d=>d.deviceId===id)?.name||id;
- const writable=(id:string)=>(devices.find(d=>d.deviceId===id) as (Device&{contactsWrite?:boolean})|undefined)?.contactsWrite!==false;
- function edit(c:Contact|null){setSelected(c);setName(c?.name||'');setNumbers(c?.numbers.join('\n')||'');setTargets([]);setPreferred((c as (Contact&{preferredDeviceId?:string})|null)?.preferredDeviceId||'');setUpdateGlobal(false);setWriteName(true);setWriteNumbers(false);setEditing(true);setError('')}
- async function recheck(){if(!selected)return;try{
-   const latest=await api<Contact>('contacts/'+encodeURIComponent(selected.id));setSelected(latest);setTargets([]);
-   setError('已读取来源的当前版本。请核对下面的值并重新勾选写回目标。');
- }catch(e){setError(err(e))}}
- function toggle(t:Target){setTargets(prev=>prev.some(x=>x.deviceId===t.deviceId&&x.rawId===t.rawId)?prev.filter(x=>x.deviceId!==t.deviceId||x.rawId!==t.rawId):[...prev,t])}
- async function save(action:string,fields:Record<string,unknown>={}){
-   if(lock.current)return;lock.current=true;setBusy(true);setError('');
-   const body={...(selected?{id:selected.id,revision:selected.revision}:{}),...fields};
-   const key=JSON.stringify([action,body]);if(intent.current?.key!==key)intent.current={key,id:crypto.randomUUID()};
-   try{await api('contacts/'+action,{...body,requestId:intent.current.id});intent.current=null;setEditing(false);setSelected(null);reload()}
-   catch(e){setError(err(e))}finally{lock.current=false;setBusy(false)}
+  if(!selected||editor)return;let alive=true;
+  setDefaultLine(localStorage.getItem('phone.line.'+selected.id)||'');
+  const timer=setInterval(()=>{if(!document.hidden)void api<Contact>('contacts/'+encodeURIComponent(selected.id)).then(row=>{if(alive)setSelected(row)}).catch(e=>{if(alive)setError(err(e))})},5000);
+  return()=>{alive=false;clearInterval(timer)}
+ },[selected?.id,editor]);
+ async function favorite(){
+  if(!selected||lock.current)return;lock.current=true;setBusy(true);setError('');
+  const body={destination:'android',id:selected.id,revision:selected.revision,favorite:!selected.favorite};
+  const key=JSON.stringify(body);if(favoriteIntent.current?.key!==key)favoriteIntent.current={key,id:crypto.randomUUID()};
+  try{await api('contacts/native/favorite',{...body,requestId:favoriteIntent.current.id});favoriteIntent.current=null;setSelected({...selected,favorite:!selected.favorite});reload()}
+  catch(e){setError(err(e))}finally{lock.current=false;setBusy(false)}
  }
- const hint=error&&<p role="alert">{error}</p>;
- if(importing)return <ContactImport canImport={canEdit} onClose={()=>setImporting(false)} onDone={message=>{setImporting(false);setImportNotice(message);setError('');reload()}}/>;
- if(editing)return <section className="contact-editor"><button onClick={()=>{setEditing(false);setTargets([])}}>取消</button><h1>{selected?'编辑联系人':'新建联系人'}</h1>
-   <label>姓名或备注<input value={name} maxLength={200} onChange={e=>setName(e.target.value)}/></label>
-   <label>电话号码（每行一个）<textarea value={numbers} rows={4} onChange={e=>setNumbers(e.target.value)}/></label>
-   <h2>写回目标</h2><p className="hint">不勾选设备时，只修改统一通讯录。</p>
-   {selected?.sources.map(s=><label key={s.deviceId+':'+s.rawId}><input type="checkbox" checked={targets.some(t=>t.deviceId===s.deviceId&&t.rawId===s.rawId)} disabled={s.readOnly||!writable(s.deviceId)} onChange={()=>toggle({deviceId:s.deviceId,rawId:s.rawId,revision:s.revision,action:'update'})}/>修改 {deviceName(s.deviceId)} · {s.name} · {s.numbers.join('、')}{s.readOnly?'（只读）':!writable(s.deviceId)?'（未授权写回）':''}</label>)}
-   {devices.filter(d=>!selected?.sources.some(s=>s.deviceId===d.deviceId)).map(d=><label key={d.deviceId}><input type="checkbox" disabled={!writable(d.deviceId)} checked={targets.some(t=>t.deviceId===d.deviceId&&t.action==='create')} onChange={()=>toggle({deviceId:d.deviceId,action:'create'})}/>在 {d.name} 创建副本{!writable(d.deviceId)?'（未授权写回）':!d.online?'（离线排队）':''}</label>)}
-   {selected&&targets.length>0&&<label><input type="checkbox" checked={updateGlobal} onChange={e=>setUpdateGlobal(e.target.checked)}/>同时修改统一备注和号码</label>}
-   {targets.some(t=>t.action==='update')&&<fieldset><legend>修改已有来源的字段</legend>
-     <label><input type="checkbox" checked={writeName} onChange={e=>setWriteName(e.target.checked)}/>写入姓名</label>
-     <label><input type="checkbox" checked={writeNumbers} onChange={e=>setWriteNumbers(e.target.checked)}/>用上面填写的号码替换所选来源的号码</label></fieldset>}
-   {selected&&(!targets.length||updateGlobal)&&<label>优先采用的姓名来源<select value={preferred} onChange={e=>setPreferred(e.target.value)}><option value="">自动选择</option>{[...new Set(selected.sources.map(s=>s.deviceId))].map(id=><option key={id} value={id}>{deviceName(id)}</option>)}</select><small>清空姓名可使用来源备注。</small></label>}
-   <button className="primary" disabled={busy||(!name.trim()&&!numbers.trim())||(targets.some(t=>t.action==='update')&&!writeName&&!writeNumbers)} onClick={()=>void save(selected?'edit':'create',{name:name.trim(),numbers:numbers.split('\n').map(s=>s.trim()).filter(Boolean),targets:targets.map(t=>t.action==='update'?{...t,fields:[...(writeName?['name']:[]),...(writeNumbers?['numbers']:[])]}:t),preferredDeviceId:preferred,updateGlobal})}>保存</button>
-   {selected&&error&&<button onClick={()=>void recheck()}>重新读取来源并核对</button>}
-   {selected&&<button className="danger" disabled={busy||targets.some(t=>t.action==='create')} onClick={()=>{const list=targets.map(t=>deviceName(t.deviceId)).join('、');if(confirm(list?'删除以下设备上选中的来源联系人？\n'+list:'将此统一联系人移入最近删除？'))void save('delete',{confirm:true,targets:targets.map(t=>({...t,action:'delete'}))})}}>删除{targets.length?'选中的来源':'统一联系人'}</button>}
-   {hint}</section>;
- const detail=selected?<DetailSheet name={selected.name||'未命名'} subtitle="联系人" onClose={()=>setSelected(null)} actions={<><button aria-label="拨打联系人" disabled={!selected.numbers.length} onClick={()=>dial(selected.numbers[0],defaultLine)}><PhoneIcon name="phone"/></button>{canEdit&&<button aria-label="编辑联系人" onClick={()=>edit(selected)}><PhoneIcon name="person"/></button>}</>}>
-   {selected.conflict&&<p className="hint">同号码有不同来源，请核对后再合并。</p>}
-   {selected.numbers.map(n=><button className="row" key={n} onClick={()=>dial(n,defaultLine)}>{n}<span>拨号 ›</span></button>)}
-   <label>首选拨出线路<select value={defaultLine} onChange={e=>{setDefaultLine(e.target.value);localStorage.setItem('phone.line.'+selected.id,e.target.value)}}><option value="">每次选择</option>{lines.map(l=><option key={l.lineId} value={l.lineId}>{l.name}</option>)}</select></label>
-   {canEdit&&(trash?<button disabled={busy} onClick={()=>void save('restore')}>恢复统一联系人</button>:<div className="controls"><button onClick={()=>edit(selected)}>编辑</button><button disabled={busy} onClick={()=>void save('edit',{favorite:!selected.favorite})}>{selected.favorite?'移出收藏':'加入收藏'}</button></div>)}
-   <h2>来源</h2>{!selected.sources.length&&<p className="hint">助手联系人，未写入系统通讯录。</p>}{selected.sources.map(s=><article className="card" key={s.deviceId+s.rawId}><b>{deviceName(s.deviceId)}</b><p>{s.name} · {s.numbers.join('、')}</p><small>{s.readOnly?'只读来源':'来源联系人'}</small>
-   {!trash&&canEdit&&selected.sources.length>1&&<button disabled={busy} onClick={()=>{if(confirm('将这个来源拆分为独立联系人？'))void save('split',{deviceId:s.deviceId,rawId:s.rawId})}}>拆分</button>}</article>)}
-   {!trash&&canEdit&&<details><summary>手动合并</summary><input type="search" aria-label="搜索待合并联系人" value={mergeQuery} onChange={e=>{setMergeQuery(e.target.value);setOther('')}} placeholder="搜索待合并联系人"/><select value={other} onChange={e=>setOther(e.target.value)}><option value="">选择另一联系人</option>{(mergeQuery.trim()?mergeResults:rows).filter(c=>c.id!==selected.id).map(c=><option key={c.id} value={c.id}>{c.name} · {c.numbers.join('、')}</option>)}</select><button disabled={!other||busy} onClick={()=>{const c=(mergeQuery.trim()?mergeResults:rows).find(r=>r.id===other);if(c&&confirm('核对号码与来源后，合并这两个联系人？'))void save('merge',{otherId:c.id,otherRevision:c.revision})}}>合并</button></details>}
-   {!!jobs.length&&<><h2>同步记录</h2>{jobs.map(j=><p key={j.id}>{deviceName(j.deviceId)} · {states[j.state]||j.state} {j.detail}</p>)}
-    {!trash&&jobs.some(j=>['conflict','failed','denied'].includes(j.state))&&<button onClick={()=>{edit(selected);void recheck()}}>核对后重新提交</button>}</>}{hint}</DetailSheet>:null;
- return <><header className="phone-toolbar"><button className="glass-circle" aria-label={favorites?'返回联系人':'个人收藏'} onClick={allContacts}><PhoneIcon name="back"/></button><h1>{favorites?'个人收藏':trash?'最近删除':'联系人'}</h1>{canEdit&&!trash?<button className="glass-circle" onClick={()=>edit(null)} aria-label="新建联系人"><PhoneIcon name="plus"/></button>:<button className="glass-circle" aria-label="互联设置" onClick={settings}><PhoneIcon name="settings"/></button>}</header>
-   {!favorites&&<div className="directory-tools"><button className="subtle directory-trash" onClick={()=>{setTrash(!trash);setOffset(0)}}>{trash?'返回通讯录':'最近删除'}</button>{!trash&&<button className="directory-import" onClick={()=>setImporting(true)}>导入 iPhone 联系人</button>}</div>}
-   {importNotice&&<p role="status">{importNotice}</p>}
-   {hint}<div className="contact-groups">{sectionContacts(rows.filter(c=>!favorites||c.favorite)).map(([letter,cards])=><section key={letter} id={'contact-section-'+letter}><h2>{letter}</h2>{cards.map(c=><button className="row contact-list-row" key={c.id} onClick={()=>{setOther('');setSelected(c)}}><PhoneAvatar name={c.name}/><span className="contact-list-name"><b>{c.name||formatPhone(c.numbers[0]||'')||'未命名'}</b>{c.conflict&&<small>待核对</small>}</span></button>)}</section>)}</div>{rows.length>8&&<aside className="contact-alphabet" aria-label="联系人索引">{sectionContacts(rows.filter(c=>!favorites||c.favorite)).map(([letter])=><button key={letter} aria-label={'跳到 '+letter+' 分组'} onClick={()=>document.getElementById('contact-section-'+letter)?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'})}>{letter}</button>)}</aside>}
-   {!rows.some(c=>!favorites||c.favorite)&&<p className="hint">{favorites?'还没有收藏联系人':query||trash?'没有匹配的联系人':'还没有联系人。可导入 iPhone 联系人，或在安卓开启通讯录共享。'}</p>}
-   {next!==null&&<button onClick={()=>setOffset(next)}>载入更多</button>}<button className="load-more" onClick={reload}>刷新</button>{detail}</>
+ const groups=sectionContacts(rows),canCreate=canEdit&&devices.some(d=>d.contactsWrite===true);
+ return <><header className="phone-toolbar"><button className="glass-circle" aria-label={favorites?'返回联系人':'个人收藏'} onClick={allContacts}><PhoneIcon name="back"/></button><h1>{favorites?'个人收藏':'联系人'}</h1>{canEdit?<button className="glass-circle" disabled={!canCreate} aria-label="新建联系人" onClick={()=>{setSelected(null);setEditor('create')}}><PhoneIcon name="plus"/></button>:<button className="glass-circle" aria-label="互联设置" onClick={settings}><PhoneIcon name="settings"/></button>}</header>
+  {notice&&<p role="status">{notice}</p>}{error&&<p role="alert">{error}</p>}
+  <div className="contact-groups">{groups.map(([letter,cards])=><section key={letter} id={'contact-section-'+letter}><h2>{letter}</h2>{cards.map(card=><button className="row contact-list-row" key={card.id} onClick={()=>{setSelected(card);setError('')}}><PhoneAvatar name={card.name}/><span className="contact-list-name"><b>{card.name||formatPhone(card.numbers[0]||'')||'未命名'}</b>{devices.length>1&&<small>{devices.find(d=>d.deviceId===card.deviceId)?.name||'安卓联系人'}</small>}</span></button>)}</section>)}</div>
+  {rows.length>8&&<aside className="contact-alphabet" aria-label="联系人索引">{groups.map(([letter])=><button key={letter} aria-label={'跳到 '+letter+' 分组'} onClick={()=>document.getElementById('contact-section-'+letter)?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'})}>{letter}</button>)}</aside>}
+  {!rows.length&&<p className="hint">{favorites?'还没有收藏联系人':query?'没有匹配的安卓联系人':'安卓系统通讯录暂无联系人。请先在安卓手机添加或导入联系人，并开启「共享本机通讯录」，网页会自动同步。'}</p>}
+  {next!==null&&<button className="load-more" onClick={()=>setOffset(next)}>载入更多</button>}<button className="load-more" onClick={reload}>刷新</button>
+  {selected&&<DetailSheet name={selected.name||'未命名'} subtitle={devices.find(d=>d.deviceId===selected.deviceId)?.name||'安卓联系人'} onClose={()=>{setSelected(null);setError('')}} actions={<><button aria-label="拨打联系人" disabled={!selected.numbers.length} onClick={()=>dial(selected.numbers[0],defaultLine)}><PhoneIcon name="phone"/></button>{canEdit&&<button aria-label="编辑联系人" disabled={!writableContact(selected,devices)} onClick={()=>setEditor('edit')}><PhoneIcon name="person"/></button>}</>}>
+   {selected.numbers.map(n=><button className="row" key={n} onClick={()=>dial(n,defaultLine)}>{formatPhone(n)}<span>拨号 ›</span></button>)}
+   <label>首选拨出线路<select value={defaultLine} onChange={e=>{setDefaultLine(e.target.value);localStorage.setItem('phone.line.'+selected.id,e.target.value)}}><option value="">每次选择</option>{lines.map(line=><option key={line.lineId} value={line.lineId}>{line.name}</option>)}</select></label>
+   {canEdit&&<div className="controls"><button disabled={!writableContact(selected,devices)} onClick={()=>setEditor('edit')}>编辑</button><button disabled={busy} onClick={()=>void favorite()}>{selected.favorite?'移出收藏':'加入收藏'}</button></div>}
+   <p className="hint">来自安卓系统通讯录，网页编辑会写回手机。</p>
+   {!writableContact(selected,devices)&&<p className="hint">此联系人只读，或手机尚未开启远程编辑。</p>}
+   {error&&<p role="alert">{error}</p>}
+  </DetailSheet>}
+  {editor&&<CallContactEditor mode={editor} contact={editor==='edit'?selected||undefined:undefined} devices={devices} onClose={()=>setEditor(null)} onSaved={()=>{setEditor(null);setSelected(null);setNotice('已写入安卓通讯录，列表将自动同步。');reload()}}/>}
+ </>;
 }

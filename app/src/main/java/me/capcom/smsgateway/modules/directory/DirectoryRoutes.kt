@@ -28,24 +28,28 @@ fun Route.directoryRoutes(directory:DirectoryService,
     }
     get("contacts"){
         if(!requireScope(call,"contacts.read"))return@get
+        if(call.request.queryParameters["deleted"]!=null){
+            call.respondText(JSONObject().put("error","助手最近删除功能已移除，请重新打开网页").toString(),ContentType.Application.Json,HttpStatusCode.Gone)
+            return@get
+        }
         call.directoryAnswer {
-            directory.contacts(call.request.queryParameters["q"].orEmpty().take(160),offset(call),devices(call),
-                call.request.queryParameters["deleted"]=="true",call.request.queryParameters["favorite"]=="true")
+            directory.androidContacts(call.request.queryParameters["q"].orEmpty().take(160),offset(call),devices(call),call.request.queryParameters["favorite"]=="true")
         }
     }
     get("contacts/{id}"){
         if(!requireScope(call,"contacts.read"))return@get
-        call.directoryAnswer { directory.view(call.parameters["id"].orEmpty(),devices(call))?:throw NoSuchElementException() }
+        call.directoryAnswer { directory.androidContact(call.parameters["id"].orEmpty(),devices(call))?:throw NoSuchElementException() }
     }
-    post("contacts/import"){
-        if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@post
-        call.directoryAnswer{directory.importContacts(installation(call),JSONObject(call.limitedBody(512*1024)),devices(call))}
-    }
-    post("contacts/{action}"){
+    post("contacts/native/{action}"){
         if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@post
         call.directoryAnswer {
-            directory.mutate(installation(call),call.parameters["action"].orEmpty(),JSONObject(call.limitedBody(65536)),devices(call))
+            directory.androidMutate(installation(call),call.parameters["action"].orEmpty(),JSONObject(call.limitedBody(65536)),devices(call))
         }
+    }
+    // Do not reinterpret a cached PWA's old assistant-only save as a system-contact write.
+    post("contacts/{action}"){
+        if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@post
+        call.respondText(JSONObject().put("error","旧联系人功能已移除，请关闭并重新打开互联电话").toString(),ContentType.Application.Json,HttpStatusCode.Gone)
     }
     get("contact-sync/jobs"){
         if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@get

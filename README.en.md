@@ -4,7 +4,7 @@
 
 CommLink uses one Android host and independently paired phones to provide SMS, contacts, SIM lines and call history to two iPhone Home Screen apps. Interconnected Messages keeps the original SMS installation. Interconnected Phone connects to a separately authorised HTTPS listener. Optional voice requires a verified cellular Voice SIP Agent, an Asterisk PBX and Groundwire.
 
-**Development version 0.9.0-dev12 (35)** retains the application ID and signing chain of SMS Connect Assistant 0.8.9 (23). The stable download predates this integration. See the [upgrade and validation guide](docs/COMMLINK-UPGRADE.md), [multi-device guide](docs/MULTI_PHONE.md), [directory guide](docs/COMMLINK-DIRECTORY.md), and [voice guide](docs/VOICE.en.md). The UI is Chinese. This project builds on [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway). See [LICENSE](LICENSE).
+**Development version 0.9.0-dev13 (36)** retains the application ID and signing chain of SMS Connect Assistant 0.8.9 (23). The stable download predates this integration. See the [upgrade and validation guide](docs/COMMLINK-UPGRADE.md), [multi-device guide](docs/MULTI_PHONE.md), [directory guide](docs/COMMLINK-DIRECTORY.md), and [voice guide](docs/VOICE.en.md). The UI is Chinese. This project builds on [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway). See [LICENSE](LICENSE).
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
@@ -81,6 +81,7 @@ A desktop regression with 1,000 messages and a 200-message conversation reduced 
 
 Upstream package names and internal identifiers are retained for data and update compatibility. See [NOTICE](NOTICE) for the upstream baseline and major dependencies. Source is licensed under [Apache License 2.0](LICENSE); third-party dependencies retain their own licenses.
 
-### Import iPhone contacts
 
-In Phone, open Contacts → Import iPhone contacts and select an exported .vcf. Review and explicitly confirm. Only names and phone numbers are stored in the assistant; system address books are not changed. The Phone installation needs contact read/write capabilities. See the [directory guide](docs/COMMLINK-DIRECTORY.md).
+### Android contacts
+
+The web directory displays Android system contacts. Enable contact sharing and remote editing to create/edit or append a call number on an explicit Android device. The UI waits for Android write acknowledgement. iPhone vCard import and assistant-card merge workflows have been removed. See the [directory guide](docs/COMMLINK-DIRECTORY.md).

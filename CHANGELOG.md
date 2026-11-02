@@ -1,5 +1,11 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev13 · 安卓通讯录为准
+
+- 移除 iPhone 导入、姓名修复、助手名片合并/拆分及最近删除入口；只展示安卓系统联系人，旧助手数据保留但不再参与姓名匹配。
+- 网页新增/编辑/号码追加绑定目标安卓及来源版本，等待手机写入确认；旧 API 返回 410，未执行的旧工作流写回任务停用。
+- Android-native contacts are authoritative; remote writes require explicit device/source binding and a Provider acknowledgement. Legacy assistant imports and merge workflows are removed. See [release notes](docs/releases/0.9.0-dev13.md).
+
 ## 0.9.0-dev12 · 电话布局与联系人入口
 
 - 下移拨号页线路和设置，固定底部导航/搜索，保留键盘避让。

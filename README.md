@@ -4,7 +4,7 @@
 
 CommLink 在一部 Android 上聚合多部已授权手机的 SIM、短信、通讯录和通话记录。iPhone 从主屏幕分别打开「互联信息」和「互联电话」。日常短信仍使用原安装入口及系统库。语音使用独立的 Voice SIP Agent、Asterisk 和 Groundwire；启用前须完成网关选卡、PBX 和媒体验证。
 
-**开发版 0.9.0-dev12（35）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。稳定发布与本开发分支的设备、权限及网页结构有差异。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
+**开发版 0.9.0-dev13（36）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。稳定发布与本开发分支的设备、权限及网页结构有差异。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
 
 [下载安装包](https://github.com/1Fann/sms-connect-assistant/releases) · [安装说明](docs/INSTALL.zh-CN.md) · [安全与隐私](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
@@ -78,6 +78,7 @@ pnpm build
 
 保留上游代码的包名和内部标识，以兼容既有数据和更新。上游基线与主要依赖见 [NOTICE](NOTICE)。源代码采用 [Apache License 2.0](LICENSE)，第三方依赖保留各自许可证。
 
-### iPhone 联系人导入
 
-互联电话的「联系人 → 导入 iPhone 联系人」支持 iPhone 导出的 .vcf。预览后确认，只保存姓名与电话号码到助手；不写入手机系统通讯录。需要该电话安装的联系人读写权限。详见[联系人说明](docs/COMMLINK-DIRECTORY.md)。
+### 安卓通讯录
+
+网页直接展示安卓系统联系人。开启「共享本机通讯录」及「允许远程编辑通讯录」后，可在网页新增、编辑或从通话详情添加号码，明确写回所选安卓手机；完成后等待安卓确认。已移除 iPhone 联系人导入和助手名片合并流程。详见[联系人说明](docs/COMMLINK-DIRECTORY.md)。

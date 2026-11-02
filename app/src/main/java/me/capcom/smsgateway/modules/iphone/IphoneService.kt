@@ -232,7 +232,7 @@ class IphoneService : Service() {
                         if(!call.attributes[smsGrant].allows("contacts.read"))return@get call.respond(emptyList<Map<String,String>>())
                         val q=call.request.queryParameters["q"].orEmpty()
                         val merged=runCatching {
-                            val items=directory.contacts(q,0,{allows(call,it)}).getJSONArray("items")
+                            val items=directory.androidContacts(q,0,{allows(call,it)}).getJSONArray("items")
                             buildList { for(i in 0 until items.length()){
                                 val c=items.getJSONObject(i);val numbers=c.getJSONArray("numbers")
                                 for(j in 0 until numbers.length())add(mapOf("name" to c.getString("name"),"number" to numbers.getString(j)))

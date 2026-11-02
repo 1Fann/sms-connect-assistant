@@ -2,6 +2,8 @@ package me.capcom.smsgateway.modules.directory
 
 import android.Manifest
 import android.content.ContentProviderOperation as Op
+import android.content.ContentProviderResult
+import android.database.Cursor
 import android.content.ContentResolver
 import android.content.Context
 import android.content.OperationApplicationException
@@ -24,8 +26,15 @@ import me.capcom.smsgateway.modules.iphone.PrivateStore
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal class DirectoryProvider(private val ctx: Context) {
-    private val resolver get() = ctx.contentResolver
+internal interface DirectoryContent {
+    fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?):Cursor?
+    fun applyBatch(authority:String,ops:ArrayList<Op>):Array<ContentProviderResult>
+}
+internal class ResolverDirectoryContent(private val resolver:ContentResolver):DirectoryContent {
+    override fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?)=resolver.query(uri,columns,where,args,null)
+    override fun applyBatch(authority:String,ops:ArrayList<Op>)=resolver.applyBatch(authority,ops)
+}
+internal class DirectoryProvider(private val ctx: Context,private val content:DirectoryContent=ResolverDirectoryContent(ctx.contentResolver)) {
     private val consent get() = ctx.getSharedPreferences("directory-consent",0)
 
     fun allowed(kind: String): Boolean {
@@ -41,7 +50,16 @@ internal class DirectoryProvider(private val ctx: Context) {
     }
 
     private fun query(uri: Uri, columns: Array<String>, where: String?, args: Array<String>?) =
-        checkNotNull(resolver.query(uri, columns, where, args, null)) { "系统数据源不可用" }
+        checkNotNull(content.query(uri, columns, where, args)) { "系统数据源不可用" }
+
+    private fun aggregateName(contactId:String):Pair<String,String> =
+        query(ContactsContract.Contacts.CONTENT_URI,arrayOf(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,ContactsContract.Contacts.NAME_RAW_CONTACT_ID),
+            "_id=?",arrayOf(contactId)).use { c ->
+            check(c.moveToFirst()){"系统联系人正在改变"}
+            c.getString(0).orEmpty() to c.getString(1).orEmpty()
+        }
+    private fun nativeRevision(version:String,values:List<String>,name:Pair<String,String>) =
+        version+"."+PrivateStore.hash("android-native-v1\u0000"+(values+name.first+name.second).joinToString("\u0000"))
 
     /** A coherent raw-contacts metadata cursor supplies the list of surviving IDs and
      * revisions. Read Data only for changed IDs. A null/failed cursor is never a snapshot. */
@@ -53,8 +71,8 @@ internal class DirectoryProvider(private val ctx: Context) {
             while (raw.moveToNext()) {
                 val id = raw.getString(0)
                 val version = raw.getString(1)
-                val identity = PrivateStore.hash((1..6).joinToString("\u0000") { raw.getString(it).orEmpty() })
-                val stamp = version + "." + identity
+                val display=aggregateName(raw.getString(2))
+                val stamp=nativeRevision(version,(1..6).map{raw.getString(it).orEmpty()},display)
                 if (stamp == previous[id]) { observe(id, stamp, null); continue }
                 val data = JSONObject().put("rawId",id).put("contactId",raw.getString(2))
                     .put("revision",stamp).put("readOnly",raw.getInt(3) != 0)
@@ -69,7 +87,7 @@ internal class DirectoryProvider(private val ctx: Context) {
                         if (fields.getString(0) == StructuredName.CONTENT_ITEM_TYPE) name = value
                     }
                 }
-                data.put("name",name).put("numbers",JSONArray(numbers.toList()))
+                data.put("name",name).put("displayName",display.first).put("nameRawId",display.second).put("numbers",JSONArray(numbers.toList()))
                 query(Data.CONTENT_URI, arrayOf(Photo.PHOTO), "raw_contact_id=? AND mimetype=?",
                     arrayOf(id,Photo.CONTENT_ITEM_TYPE)).use { photo ->
                     if (photo.moveToFirst() && !photo.isNull(0)) {
@@ -156,7 +174,7 @@ internal class DirectoryProvider(private val ctx: Context) {
                 query(RawContacts.CONTENT_URI,columns,"_id=? AND deleted=0",arrayOf(raw)).use { r ->
                     if(!r.moveToFirst())return result("conflict","来源已删除，或之前的删除结果待核实")
                     if(r.getInt(2)!=0)return result("denied","此来源是只读账号")
-                    val revision=r.getString(0)+"."+PrivateStore.hash((0..5).joinToString("\u0000"){r.getString(it).orEmpty()})
+                    val revision=nativeRevision(r.getString(0),(0..5).map{r.getString(it).orEmpty()},aggregateName(r.getString(1)))
                     if(revision!=expected)return result("conflict","来源已被修改，请刷新后重新确认")
                 }
                 ops.add(Op.newAssertQuery(RawContacts.CONTENT_URI)
@@ -170,7 +188,7 @@ internal class DirectoryProvider(private val ctx: Context) {
                 ops.add(Op.newDelete(RawContacts.CONTENT_URI).withSelection("_id=?",arrayOf(raw)).withExpectedCount(1).build())
                 if(!ready()||!allowed("contacts.write"))return result("denied","配对或写回授权已变更，请重新确认")
                 if(!claim())return result("conflict","上次删除结果未知，请在来源设备核实")
-                resolver.applyBatch(ContactsContract.AUTHORITY,ops)
+                content.applyBatch(ContactsContract.AUTHORITY,ops)
                 return result("done",raw=raw)
             }
             require(create || action=="update")
@@ -210,7 +228,7 @@ internal class DirectoryProvider(private val ctx: Context) {
             ops.add(insert(markerMime,marker))
             if(!ready()||!allowed("contacts.write"))return result("denied","配对或写回授权已变更，请重新确认")
             if(!claim())return result("conflict","上次写回已开始但无法确认结果，请在来源设备核实")
-            val changes=resolver.applyBatch(ContactsContract.AUTHORITY,ops)
+            val changes=content.applyBatch(ContactsContract.AUTHORITY,ops)
             result("done",raw=if(create)requireNotNull(changes.first().uri?.lastPathSegment) else raw)
         }catch(_:SecurityException){result("denied","系统拒绝写入该账号")}
         catch(_:OperationApplicationException){result("conflict","来源版本或写入条件已改变")}

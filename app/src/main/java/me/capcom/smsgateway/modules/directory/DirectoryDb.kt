@@ -63,6 +63,7 @@ internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : 
     private fun createCallSeen(db:SQLiteDatabase){
         db.execSQL("CREATE TABLE call_seen(installation TEXT NOT NULL,device TEXT NOT NULL,raw TEXT NOT NULL,date INTEGER NOT NULL,PRIMARY KEY(installation,device,raw,date))")
     }
+    // Unused legacy receipt table retained only for schema compatibility; no import API remains.
     private fun createImports(db:SQLiteDatabase){
         db.execSQL("CREATE TABLE contact_imports(id TEXT PRIMARY KEY,owner TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,created INTEGER NOT NULL)")
     }

@@ -99,5 +99,5 @@ export function Recent({canAddContacts,devices,dial,installation,query,searching
   <button className="poster-row danger" onClick={()=>{if(mode==='removed')hiddenChange(hidden.filter(k=>k!==detail.key));else remove([detail.key]);setDetail(null)}}>{mode==='removed'?'恢复到通话列表':'从助手移除此记录'}</button>
   {history&&<button className="poster-row" onClick={()=>setHistory(false)}>收起通话记录</button>}
  </DetailSheet>}
- {detail&&contactMode&&<CallContactEditor number={detail.number} mode={contactMode} onClose={()=>setContactMode(null)} onSaved={name=>{setContactMode(null);setDetail(old=>old?{...old,name:name||old.name}:old);setContactNotice('已保存到助手通讯录');setOffset(0);refresh(v=>v+1)}}/>}</>;
+ {detail&&contactMode&&<CallContactEditor devices={devices} number={detail.number} mode={contactMode} onClose={()=>setContactMode(null)} onSaved={name=>{setContactMode(null);setDetail(old=>old?{...old,name:name||old.name}:old);setContactNotice('已写入安卓通讯录');setOffset(0);refresh(v=>v+1)}}/>}</>;
 }

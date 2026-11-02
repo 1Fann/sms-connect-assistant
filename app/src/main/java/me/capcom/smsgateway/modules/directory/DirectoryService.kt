@@ -159,15 +159,13 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
 
     private fun bump(id:String) { db.execSQL("UPDATE contacts SET revision=revision+1 WHERE id=?",arrayOf(id)) }
 
-    fun resolveName(number:String,allowedDevice:(String)->Boolean={true}):String? {
-        val key=lookupKey(region,number)?:return null
-        val hits=matchingIds(key).mapNotNull { view(it,allowedDevice,includeConflict=false) }
-            .filter { card ->
-                (card.getJSONArray("numbers").strings() + card.getJSONArray("sources").objects().flatMap { it.getJSONArray("numbers").strings() })
-                    .any { lookupKey(region,it)==key }
-            }
-        return hits.singleOrNull()?.optString("name")?.takeIf { it.isNotBlank() }
-    }
+    fun resolveName(number:String,allowedDevice:(String)->Boolean={true}):String? =
+        AndroidDirectory(this).resolve(number,allowedDevice)
+
+    internal fun regionCode()=region
+    fun androidContacts(query:String,offset:Int,allowed:(String)->Boolean,favorite:Boolean=false)=AndroidDirectory(this).list(query,offset,allowed,favorite)
+    fun androidContact(id:String,allowed:(String)->Boolean)=AndroidDirectory(this).view(id,allowed)
+    fun androidMutate(owner:String,action:String,body:JSONObject,allowed:(String)->Boolean)=AndroidDirectory(this).mutate(owner,action,body,allowed)
 
     private fun visibleSources(id:String,allowed:(String)->Boolean,deleted:Boolean):List<JSONObject> =
         db.rows("""SELECT s.device,s.payload,s.deleted FROM sources s JOIN grants g ON s.device=g.device
@@ -276,11 +274,18 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
 
     fun mutate(owner:String,action:String,b:JSONObject,allowed:(String)->Boolean):JSONObject =
         DirectoryEdits(this,region,allowed).run(owner,action,b)
-    fun importContacts(owner:String,body:JSONObject,allowed:(String)->Boolean)=DirectoryImport(this,allowed).run(owner,body)
+
+    internal fun retireLegacyWrites(){
+        // Retired assistant workflows must not later create contacts when a phone reconnects.
+        db.execSQL("""UPDATE jobs SET state='revoked',detail='旧助手联系人功能已停用，未执行写回',finished=?
+            WHERE state='queued' AND NOT EXISTS(
+                SELECT 1 FROM changes c WHERE c.id=jobs.id AND c.contact=jobs.contact
+                AND c.action IN ('android-create','android-edit'))""",arrayOf(System.currentTimeMillis()))
+    }
 
     companion object {
         @Volatile private var instance:DirectoryService?=null
         @Synchronized fun get(context:Context):DirectoryService =
-            instance?:DirectoryService(context.applicationContext).also{instance=it}
+            instance?:DirectoryService(context.applicationContext).also{it.retireLegacyWrites();instance=it}
     }
 }

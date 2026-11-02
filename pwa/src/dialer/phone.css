@@ -22,7 +22,6 @@
 
 .contact-sheet{touch-action:pan-y}.poster-actions a[aria-disabled=true]{opacity:.38}.dock-icon{position:relative;display:inline-flex;align-items:center;justify-content:center}.missed-badge{position:absolute;top:-7px;right:-13px;min-width:17px;height:17px;padding:0 4px;border-radius:10px;background:#ff3b30;color:#fff;font-size:10px;font-style:normal;font-weight:650;line-height:17px;text-align:center;border:1px solid var(--bg)}
 
-.directory-tools{display:flex;align-items:center;justify-content:space-between;gap:8px}.directory-import{font-size:13px;padding:5px 8px;min-height:36px}.contact-import .card .hint{margin:8px 0 0}.import-select{background:var(--panel);width:100%;margin:10px 0}.import-file-name{overflow-wrap:anywhere}.contact-import h2{font-size:20px}.contact-import>p:not(.hint){font-size:14px}.import-preview small{overflow-wrap:anywhere}
 
 /* Editors isolate their scroll from the persistent dock and remain reachable above the keyboard. */
 .call-contact-editor{position:fixed;z-index:70;inset:var(--viewport-top,0px) 0 auto;height:var(--height,100dvh);width:min(100%,600px);margin:auto;background:var(--bg);padding:calc(env(safe-area-inset-top) + 4px) 14px calc(env(safe-area-inset-bottom) + 24px + var(--phone-keyboard));overflow:auto;overscroll-behavior:contain;animation:detail-in .25s cubic-bezier(.22,1,.36,1)}

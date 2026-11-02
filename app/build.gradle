@@ -23,8 +23,8 @@ android {
         applicationId "me.capcom.smsgateway.iphone"
         minSdk 21
         targetSdk 33
-        versionCode 35
-        versionName "0.9.0-dev12"
+        versionCode 36
+        versionName "0.9.0-dev13"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

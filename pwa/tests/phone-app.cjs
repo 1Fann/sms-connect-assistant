@@ -15,18 +15,18 @@ const server=http.createServer((req,res)=>{
  try{
  const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});const writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
- const row={id:'demo',name:'合成联系人',numbers:['5550100'],sources:[],revision:2,favorite:false,conflict:false};
+ const row={id:'demo',name:'合成联系人',numbers:['5550100'],deviceId:'server',primaryRawId:'raw',sources:[{deviceId:'server',rawId:'raw',contactId:'5',revision:'source-2',name:'合成联系人',numbers:['5550100'],readOnly:false}],revision:2,favorite:false,conflict:false};
  await page.route('**/api/**',async route=>{
    const req=route.request(),endpoint=new URL(req.url()).pathname.replace('/api/v2/','');
    const data={
     session:{installationId:'test',permissions:['contacts.read','calls.read','contacts.write']},
-    devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · A',online:true,confirmed:true}],
+    devices:[{deviceId:'server',name:'主机',online:true,contactsWrite:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · A',online:true,confirmed:true}],
     'call-history/missed':{count:0},'call-history/seen':{count:0},'voice/history':[],contacts:{items:[row],next:null},
-    'contact-sync/jobs':{items:[]},'call-history':{items:[{id:'record1',name:'合成联系人',number:'5550100',deviceId:'server',type:'missed',date:1720000000000,duration:0}],next:null},
+    'contact-sync/jobs':{items:[{id:'job',state:'done',detail:''}]},'call-history':{items:[{id:'record1',name:'合成联系人',number:'5550100',deviceId:'server',type:'missed',date:1720000000000,duration:0}],next:null},
    };
    if(req.method()!=='GET'&&endpoint!=='call-history/seen')writes.push([endpoint,req.postDataJSON()]);
-   if(!(endpoint in data)&&endpoint!=='contacts/edit')throw Error('Unexpected fixture path '+endpoint);
-   return route.fulfill({contentType:'application/json',body:JSON.stringify(data[endpoint]||{id:'demo'})});
+   if(!(endpoint in data)&&endpoint!=='contacts/native/edit')throw Error('Unexpected fixture path '+endpoint);
+   return route.fulfill({contentType:'application/json',body:JSON.stringify(data[endpoint]||{id:'demo',deviceId:'server',jobId:'job',state:'queued'})});
  });
  await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
  await page.locator('nav button').filter({hasText:'通话'}).click();
@@ -37,11 +37,11 @@ const server=http.createServer((req,res)=>{
  await page.locator('nav button').filter({hasText:'联系人'}).click();
  await page.getByRole('button',{name:/合成联系人/}).click();
  await page.getByRole('button',{name:'编辑',exact:true}).click();
- await page.getByLabel('姓名或备注').fill('合成备注');
- await page.getByRole('button',{name:'保存',exact:true}).click();
+ await page.getByLabel('姓名').fill('合成备注');
+ await page.getByRole('button',{name:'完成',exact:true}).click();
  await page.waitForFunction(()=>!Array.from(document.querySelectorAll('h1')).some(el=>el.textContent==='编辑联系人'));
- assert.equal(writes.length,1);assert.equal(writes[0][0],'contacts/edit');assert.deepEqual(writes[0][1].targets,[]);
+ assert.equal(writes.length,1);assert.equal(writes[0][0],'contacts/native/edit');assert.equal(writes[0][1].deviceId,'server');assert.equal(writes[0][1].rawId,'raw');assert.equal('targets' in writes[0][1],false);
  assert.ok(writes[0][1].requestId);assert.equal(writes[0][1].revision,2);assert.deepEqual(errors,[]);
- console.log('PASS recent → dial, unconfigured/unauthorized calling, explicit contact edit with no device writes');
+ console.log('PASS recent → dial, unconfigured/unauthorized calling, explicit Android edit through a fake write receipt');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

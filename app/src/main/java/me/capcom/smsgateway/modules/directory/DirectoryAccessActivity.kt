@@ -19,7 +19,7 @@ class DirectoryAccessActivity: AppCompatActivity() {
         "contacts.write" to Manifest.permission.WRITE_CONTACTS,
         "calls.read" to Manifest.permission.READ_CALL_LOG
     )
-    private val titles=mapOf("contacts.read" to "共享本机通讯录","contacts.write" to "允许指定来源写回","calls.read" to "共享本机通话记录")
+    private val titles=mapOf("contacts.read" to "共享本机通讯录","contacts.write" to "允许远程编辑通讯录","calls.read" to "共享本机通话记录")
     private val prefs get()=getSharedPreferences("directory-consent",0)
 
     override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);title="通讯数据授权"}
@@ -28,7 +28,7 @@ class DirectoryAccessActivity: AppCompatActivity() {
     private fun render(){
         val layout=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(28,28,28,28)}
         setContentView(ScrollView(this).apply{addView(layout)})
-        layout.addView(TextView(this).apply{text="逐项选择允许主节点同步的数据。通讯录写回仅在互联电话明确选择本机来源时执行。系统可能限制通话记录权限。"})
+        layout.addView(TextView(this).apply{text="逐项选择允许主节点同步的数据。网页编辑会修改这台手机的系统通讯录，仅在开启远程编辑后执行。系统可能限制通话记录权限。"})
         for((index,key) in permissions.keys.withIndex()){
             val permission=permissions.getValue(key)
             val label=titles.getValue(key)

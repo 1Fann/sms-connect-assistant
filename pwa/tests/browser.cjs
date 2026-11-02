@@ -8,9 +8,13 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL || 'msedge'});
  try{
  const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true,serviceWorkers:'block'});
- let paired=false;let failSend=true;let historyFails=false;let failedMessage=null;const ids=[];const errors=[];let requestedLine='fixture-stable-one';let peerAvailable=true;
+ let paired=false;let failSend=true;let historyFails=false;let failedMessage=null;const ids=[];const accepted=new Set();const errors=[];let requestedLine='fixture-stable-one';let peerAvailable=true;
  page.on('pageerror',e=>errors.push(e.message));
+ let startupGate=null;
+ const startupRequests=[];
  await page.route('**/api/**',async route=>{const p=new URL(route.request().url()).pathname;let data={};let status=200;
+ if(startupGate){startupRequests.push(p);if(p==='/api/status')await startupGate.promise;}
+
  if(p==='/api/pair'){data={status:'pending'}}else if(p==='/api/pair/finish'){paired=true;data={status:'ok'}}else if(!paired){status=401}
  else if(p==='/api/status'){data={publicConnectivity:'unverified'}}
  else if(p==='/api/phones'){data=[{id:'server',name:'服务器手机'}]}
@@ -18,8 +22,8 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  else if(p==='/api/history'){if(historyFails)status=500;data={items:[{id:'sms:1',address:'13800138000',body:'这是一条用于界面验证的测试短信。',date:Date.now(),incoming:true,read:false,sim:1,state:'received'}],next:null}}
  else if(p==='/api/conversations'){data=[]}
  else if(p==='/api/outgoing'){data=failedMessage?[failedMessage]:[]}
- else if(p==='/api/send'){const body=route.request().postDataJSON();assert.equal(body.lineId,requestedLine);assert.equal(body.sim,undefined);ids.push(body.id);if(failSend){failSend=false;await route.abort('failed');return}data={state:'accepted'}}
- else if(p.startsWith('/api/send/')){data={state:'unknown'}}
+ else if(p==='/api/send'){const body=route.request().postDataJSON();assert.equal(body.lineId,requestedLine);assert.equal(body.sim,undefined);ids.push(body.id);if(failSend){failSend=false;await route.abort('failed');return}accepted.add(body.id);data={state:'accepted'}}
+ else if(p.startsWith('/api/send/')){data={state:accepted.has(p.slice('/api/send/'.length))?'accepted':'unknown'}}
  await route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
  });
  const origin='http://127.0.0.1:'+server.address().port;
@@ -46,6 +50,22 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  requestedLine='fixture-peer-same-slot';await sendButton.click();await page.waitForFunction(()=>!document.querySelector('textarea[aria-label=短信内容]').value);
  assert.equal(ids.length,3);assert.equal(await page.evaluate(()=>localStorage.getItem('sms.last-line')),requestedLine);
  console.log('PASS: second device sharing the same SIM slot, no silent offline fallback, explicit stable line on send');
+ historyFails=false;
+ let releaseStatus;
+ startupGate={promise:new Promise(resolve=>{releaseStatus=resolve})};
+ await page.reload({waitUntil:'domcontentloaded'});
+ await page.waitForFunction(()=>document.querySelector('h1'));
+ for(let i=0;i<40&&!['/api/status','/api/history','/api/conversations'].every(p=>startupRequests.includes(p));i++)
+  await new Promise(resolve=>setTimeout(resolve,25));
+ assert.ok(['/api/status','/api/history','/api/conversations'].every(p=>startupRequests.includes(p)),
+  'Read-only startup requests must be in flight before the session check completes');
+ assert.equal(await page.getByText('138 0013 8000',{exact:true}).count(),0,'Authenticated rows stay hidden before the session check');
+ releaseStatus();
+ await page.getByText('138 0013 8000',{exact:true}).waitFor();
+ assert.equal(startupRequests.filter(p=>p==='/api/history').length,1);
+ assert.equal(startupRequests.filter(p=>p==='/api/conversations').length,1);
+ startupGate=null;
+ console.log('PASS parallel startup with a blocked session check and no duplicate initial inbox requests');
  console.log('PASS: pairing, two SIM choices, history, safe timeout retry, accepted-not-delivered state, mobile overflow, no JS errors');
  }finally{await browser.close();server.close()}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});

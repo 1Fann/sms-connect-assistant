@@ -5,6 +5,18 @@ self.addEventListener('activate', event => event.waitUntil(caches.keys().then(ke
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if(url.origin !== self.location.origin || !(['/', '/index.html', '/manifest.webmanifest','/icon-192.png','/icon-512.png'].includes(url.pathname) || url.pathname.startsWith('/assets/')) || event.request.method !== 'GET') return;
+  // Content-hashed assets have a new URL whenever their contents change.
+  if (/^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(url.pathname)) {
+    event.respondWith((async()=>{
+      const cache=await caches.open(CACHE);
+      const cached=await cache.match(event.request);
+      if(cached)return cached;
+      const response=await fetch(event.request);
+      if(response.ok)event.waitUntil(cache.put(event.request,response.clone()));
+      return response;
+    })());
+    return;
+  }
   event.respondWith(fetch(event.request).then(response=>{
     if(response.ok) { const copy=response.clone(); event.waitUntil(caches.open(CACHE).then(c=>c.put(event.request,copy))); }
     return response;

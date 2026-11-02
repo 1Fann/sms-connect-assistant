@@ -24,6 +24,7 @@ import {useViewport} from './viewport';
 import {composeRecipient} from './composeLink';
 
 const EMPTY:Sms[]=[];
+type HistoryPage={items:Sms[],next:string|null};
 
 function App(){
  useViewport();
@@ -36,6 +37,7 @@ function App(){
  const [region,setRegion]=useState<CountryCode>(()=>(localStorage.getItem('sms.region') as CountryCode)||'CN');
  const [pushStatus,setPushStatus]=useState('尚未授权'),[contacts,setContacts]=useState<{name:string,number:string}[]>([]);
  const cursorRef=useRef(cursor);cursorRef.current=cursor;
+ const firstLoad=useRef<{history:Promise<HistoryPage>,metadata:Promise<ConversationState[]>}|null>(null);
  const [conversationStates,setConversationStates]=useState<ConversationState[]>([]),[metadataReady,setMetadataReady]=useState(false);
  const metadataRef=useRef(conversationStates);metadataRef.current=conversationStates;
  const mutation=useRef(false),generation=useRef(0),metadataWrites=useRef(0);
@@ -86,14 +88,16 @@ function App(){
  const fail=(e:unknown)=>{setError(e instanceof Error?e.message:'连接失败'); if(e instanceof ApiError&&e.status===401){setPaired(false);setRows([]);setOutgoing([]);setConversationStates([]);setMetadataReady(false)}};
  async function refresh(older=false){
   if(loading.current)return; loading.current=true;
+  const initial=older?null:firstLoad.current;
+  if(!older)firstLoad.current=null;
   const epoch=generation.current;
   const simTask=api<SimLine[]>('sims').then(lines=>{
    setSims(lines);setSim(prev=>prev || preferredSmsLine(lines,localStorage.getItem('sms.last-line')));
   });
   const phonesTask=api<Phone[]>('phones').then(setPhones);
-  const metadataTask=api<ConversationState[]>('conversations').then(result=>{if(epoch===generation.current&&!mutation.current&&!metadataWrites.current){if(!Array.isArray(result))throw Error('会话状态暂不可用，请更新安卓应用后重试');setConversationStates(prev=>reuseRecords(prev,result));setMetadataReady(true)}});
+  const metadataTask=(initial?.metadata??api<ConversationState[]>('conversations')).then(result=>{if(epoch===generation.current&&!mutation.current&&!metadataWrites.current){if(!Array.isArray(result))throw Error('会话状态暂不可用，请更新安卓应用后重试');setConversationStates(prev=>reuseRecords(prev,result));setMetadataReady(true)}});
   const historyTask=(async()=>{
-   const data=await api<{items:Sms[],next:string|null}>('history'+(older&&cursorRef.current?'?before='+cursorRef.current:''));
+   const data=await (initial?.history??api<HistoryPage>('history'+(older&&cursorRef.current?'?before='+cursorRef.current:'')));
    if(older){const el=screen==='chat'?chatView.current:listView.current;if(el)pendingAnchor.current={el,top:el.scrollTop,height:el.scrollHeight}}
    setRows(prev=>{
     if(older)return reuseRecords(prev,[...new Map([...prev,...data.items].map(m=>[m.id,m])).values()]);
@@ -119,7 +123,19 @@ function App(){
    for(const result of results)if(result.status==='rejected')fail(result.reason);
   }finally{loading.current=false}
  }
- useEffect(()=>{api('status').then(()=>setPaired(true)).catch(e=>{if(!(e instanceof ApiError&&e.status===401))fail(e)})},[]);
+ useEffect(()=>{
+  let alive=true;
+  // Read-only requests can start with the session check. Publish their results only
+  // through refresh after authentication succeeds, and consume them only once.
+  const initial={history:api<HistoryPage>('history'),metadata:api<ConversationState[]>('conversations')};
+  firstLoad.current=initial;
+  void Promise.allSettled([initial.history,initial.metadata]);
+  api('status').then(()=>{if(alive)setPaired(true)}).catch(e=>{
+   if(firstLoad.current===initial)firstLoad.current=null;
+   if(alive&&!(e instanceof ApiError&&e.status===401))fail(e);
+  });
+  return ()=>{alive=false;if(firstLoad.current===initial)firstLoad.current=null};
+ },[]);
  useEffect(()=>{if(!paired)return;void refresh();
   const timer=setInterval(()=>{if(!document.hidden)void refresh()},8000); const visible=()=>{if(!document.hidden)void refresh()};document.addEventListener('visibilitychange',visible);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible)};
  },[paired]);

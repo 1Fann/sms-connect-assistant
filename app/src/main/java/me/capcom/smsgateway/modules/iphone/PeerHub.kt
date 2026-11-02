@@ -150,6 +150,14 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
         val alias=row.sourceSubscription?.let { scalar("SELECT alias FROM lines WHERE device='server' AND sub=?",it.toString())?.toInt() }
         return row.copy(sim=alias?:row.sim,sourceSubscription=null)
     }
+    fun localHistory(rows:List<SmsRow>):List<SmsRow> {
+        if(rows.isEmpty())return rows
+        // A page needs one registry read, not one SQLite query per SMS.
+        val aliases=readableDatabase.rawQuery("SELECT sub,alias FROM lines WHERE device='server'",null).use { c->
+            buildMap<Int,Int> { while(c.moveToNext())put(c.getInt(0),c.getInt(1)) }
+        }
+        return rows.map { row->row.copy(sim=aliases[row.sourceSubscription]?:row.sim,sourceSubscription=null) }
+    }
     fun localSendAlias(requestId:String,oldSlot:Int?):Int? =
         scalar("SELECT alias FROM lines JOIN sms_bindings USING(sub) WHERE device='server' AND request_id=?",requestId)?.toInt() ?: oldSlot
     @Synchronized fun isRemote(alias:Int)=scalar("SELECT device FROM lines WHERE alias=?",alias.toString())?.let{it!="server"} ?: (alias in 101..104)

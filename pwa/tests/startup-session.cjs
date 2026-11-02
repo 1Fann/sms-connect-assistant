@@ -14,16 +14,22 @@ const server=http.createServer((req,res)=>{
   for(const scenario of ['valid','expired','network']){
    const context=await browser.newContext({serviceWorkers:'block',viewport:{width:390,height:844}});
    await context.addInitScript(()=>{
-    window.pairAppeared=false;
-    new MutationObserver(()=>{if(document.querySelector('.pair'))window.pairAppeared=true}).observe(document,{childList:true,subtree:true});
+    window.pairAppeared=false;window.removedAppeared=false;
+    new MutationObserver(()=>{if(document.querySelector('.pair'))window.pairAppeared=true;if(document.body?.textContent.includes('Removed fixture'))window.removedAppeared=true}).observe(document,{childList:true,subtree:true});
    });
+   const requests=[];
    const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
    let release;const gate=new Promise(resolve=>release=resolve);
    let session=scenario==='network'?'offline':scenario==='expired'?'expired':'valid',statusReads=0,sends=0;
    await context.route('**/api/**',async route=>{
     const key=new URL(route.request().url()).pathname.slice(5);let status=200,data={};
-    if(key==='status'){statusReads++;if(statusReads===1)await gate;if(session==='offline')status=503;else if(session==='expired')status=401}
-    else if(key==='refresh')status=401;
+    requests.push(key);
+    if(key==='history'&&new URL(route.request().url()).searchParams.get('startup')==='1'){
+     statusReads++;if(statusReads===1)await gate;
+     if(session==='offline')status=503;else if(session==='expired')status=401;
+     else data={items:[{id:'sms:1',address:'+15550100001',body:'Synthetic startup fixture',date:1,incoming:true,read:true,state:'received'}],next:null,conversations:[{address:'+16502530000',pinned:0,removedBefore:100,unread:false}]};
+     if(status===200)data.items.push({id:'sms:2',address:'+16502530000',body:'Removed fixture',date:1,incoming:true,read:true,state:'received'});
+    }else if(key==='refresh')status=401;
     else if(session==='expired')status=401;
     else if(key==='history')data={items:[{id:'sms:1',address:'+15550100001',body:'Synthetic startup fixture',date:1,incoming:true,read:true,state:'received'}],next:null};
     else if(['conversations','outgoing','sims','phones'].includes(key))data=[];
@@ -36,6 +42,8 @@ const server=http.createServer((req,res)=>{
    await page.getByRole('region',{name:'正在连接手机'}).waitFor();
    assert.equal(await page.locator('.pair').count(),0);
    assert.equal(await page.getByText('Synthetic startup fixture',{exact:true}).count(),0);
+   for(let i=0;i<40&&!requests.length;i++)await new Promise(resolve=>setTimeout(resolve,25));
+   assert.deepEqual(requests,['history'],'One live authenticated request before startup data arrives');
    release();
    if(scenario==='expired'){
     await page.getByLabel('安卓显示的配对码').waitFor();
@@ -49,6 +57,7 @@ const server=http.createServer((req,res)=>{
     }
     await page.getByText('Synthetic startup fixture',{exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>window.pairAppeared),false,'Valid/retried sessions must never mount a pairing form');
+    assert.equal(await page.evaluate(()=>window.removedAppeared),false,'Startup removal metadata must apply before rendering rows');
     session='expired';await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
     await page.getByLabel('安卓显示的配对码').waitFor();
     assert.equal(await page.getByText('Synthetic startup fixture',{exact:true}).count(),0);

@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev28 · 实时短信启动优化
+
+- 首次实时短信响应同时返回当前授权范围内的会话状态，合并启动鉴权、短信和会话状态请求。旧服务端不包含会话状态时仍兼容分开读取。
+- 一页本机短信的稳定 SIM 别名改为批量读取；同页已读时间按号码复用，保留历史线路、未读与移除规则。
+- 不保存 iPhone 本地短信列表或正文，每次都读取安卓实时数据。网络往返仍决定最低等待时间。
+- One authenticated live response supplies initial SMS and scoped conversation metadata. Batch stable SIM aliases and reuse per-request read marks without persistent SMS caching.
+
 ## 0.9.0-dev27 · 启动状态修复
 
 - 区分会话验证中、已授权与未配对，避免重开短信时先闪出配对页面。验证期间仅显示无个人数据的列表占位。

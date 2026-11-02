@@ -253,15 +253,19 @@ class IphoneService : Service() {
                     }
                     get("/api/history") {
                         val cursors=call.request.queryParameters["before"]?.split("_").orEmpty()
-                        val local=if(!allows(call,"server"))emptyList() else history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200).map(hub::localHistory)
-                        val remote=hub.page(cursors.getOrNull(1)?.toLong()?:Long.MAX_VALUE,nodes(call)).map { it.copy(read=it.read || it.date<=store.seen(it.address)) }
+                        val local=if(!allows(call,"server"))emptyList() else hub.localHistory(history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200))
+                        val seen=mutableMapOf<String,Long>()
+                        val remote=hub.page(cursors.getOrNull(1)?.toLong()?:Long.MAX_VALUE,nodes(call)).map { it.copy(read=it.read || it.date<=seen.getOrPut(it.address){store.seen(it.address)}) }
                         fun next(rows:List<SmsRow>, peer:Boolean=false)=if(rows.size!=200)"0" else if(peer)hub.pageCursor(rows.last().id).toString() else rows.last().id.substringAfter(':')
                         val cursor=if(local.size<200 && remote.size<200)null else next(local)+"_"+next(remote,true)
-                        call.respond(mapOf("items" to (local+remote).let { rows ->
+                        val result=mutableMapOf<String,Any?>("items" to (local+remote).let { rows ->
                             val marks=store.scopedReadTimes(smsScope(call))
                             val names=if(!call.attributes[smsGrant].allows("contacts.read"))emptyMap() else runCatching { directory.resolveNames(rows.map { it.address }){ d->allows(call,d) } }.getOrDefault(emptyMap())
                             rows.map { r->r.copy(name=if(call.attributes[smsGrant].allows("contacts.read"))names[r.address]?:r.name else null, read=r.read || r.date<=(marks[r.address]?:0L)) }
-                        }, "next" to cursor))
+                        }, "next" to cursor)
+                        if(call.request.queryParameters["startup"]=="1")
+                            result["conversations"]=visibleStates(call,store.scopedStates(smsScope(call)))
+                        call.respond(result)
                     }
                     get("/api/outgoing") {
                         call.respond((if(allows(call,"server"))store.recentRequests() else emptyList()).mapNotNull { id -> messages.getMessage(id)?.let {

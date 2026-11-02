@@ -23,6 +23,7 @@ class SmsHistory(private val context: Context, private val store: PrivateStore) 
         val names = mutableMapOf<String, String?>()
         val displays = mutableMapOf<String, String>()
         val slots = mutableMapOf<Int, Int?>()
+        val seen = mutableMapOf<String, Long>()
         context.contentResolver.query(Telephony.Sms.CONTENT_URI,
             arrayOf("_id", "address", "body", "date", "type", "read", "sub_id", "status", "creator"),
             if(ascending) "_id > ?" else "_id < ?", arrayOf(before.toString()), if(ascending) "_id ASC" else "_id DESC")?.use { c ->
@@ -38,7 +39,7 @@ class SmsHistory(private val context: Context, private val store: PrivateStore) 
                 if(subscription!=null && !slots.containsKey(subscription))
                     slots[subscription]=SubscriptionsHelper.getSimSlotIndex(context,subscription)?.plus(1)
                 result.add(SmsRow("sms:${c.getLong(0)}", address, displays.getOrPut(raw){format(raw)}, name, c.getString(2) ?: "", date,
-                    type == 1, c.getInt(5) == 1 || date <= store.seen(address),
+                    type == 1, c.getInt(5) == 1 || date <= seen.getOrPut(address){store.seen(address)},
                     subscription?.let { slots[it] },
                     when { type == 1 -> "received"; type == 5 || (type == 2 && c.getInt(7) >= 64) -> "failed"; type == 2 && c.getInt(7) == 0 -> "delivered"; type == 2 -> "sent"; type == 4 || type == 6 -> "accepted"; else -> "unknown" },c.getString(8),sourceSubscription=if(c.isNull(6)) null else c.getInt(6)))
             }

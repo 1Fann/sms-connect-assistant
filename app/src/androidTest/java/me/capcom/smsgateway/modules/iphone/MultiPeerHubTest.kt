@@ -56,6 +56,21 @@ class MultiPeerHubTest {
         return packet().put("rows",JSONArray().put(row))
     }
 
+    @Test fun batchHistoryAliasesMatchSingleRowsAndPreserveRetiredLocalSubscriptions() {
+        hub.allLines()
+        val rows=(1..200).map { i->
+            SmsRow("sms:"+i,"fixture","fixture",null,"Synthetic",i.toLong(),true,false,i%2+1,"received",
+                sourceSubscription=if(i%2==0)31 else 32)
+        } + SmsRow("sms:unknown","fixture","fixture",null,"Synthetic",201,true,false,2,"received",sourceSubscription=777)
+        assertEquals(rows.map{hub.localHistory(it)},hub.localHistory(rows))
+        localSlots[1]=99;hub.allLines()
+        val mapped=hub.localHistory(rows)
+        assertEquals(rows.map{hub.localHistory(it)},mapped)
+        assertTrue(mapped.all{it.sourceSubscription==null})
+        assertEquals(2,mapped.last().sim)
+        assertTrue(hub.localHistory(emptyList()).isEmpty())
+    }
+
     @Test fun invalidWireRecordDoesNotPartiallyCommitEarlierRows() {
         val token=PrivateStore.token()
         enroll(token)

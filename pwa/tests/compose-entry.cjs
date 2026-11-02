@@ -14,6 +14,7 @@ const server=http.createServer((req,res)=>{const name=path.resolve(root,'.'+(req
    else if(key==='refresh'){status=401}
    else if(key==='pair')data={status:'pending'};
    else if(key==='pair/finish'){paired=true;data={status:'ok'}}
+   else if(!paired){status=401}
    else if(key==='sims')data=[{id:1,lineId:'fixture-line',name:'SIM 1',phoneName:'Fixture',slot:1,simName:'SIM 1',online:true}];
    else if(key==='phones')data=[{id:'server',name:'Fixture'}];
    else if(key==='history')data={items:[],next:null};

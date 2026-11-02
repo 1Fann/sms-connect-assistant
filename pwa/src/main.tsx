@@ -24,7 +24,7 @@ import {useViewport} from './viewport';
 import {composeRecipient} from './composeLink';
 
 const EMPTY:Sms[]=[];
-type HistoryPage={items:Sms[],next:string|null};
+type HistoryPage={items:Sms[],next:string|null,conversations?:ConversationState[]};
 
 function App(){
  useViewport();
@@ -127,12 +127,13 @@ function App(){
  useEffect(()=>{
   let alive=true;
   setPaired(null);setSessionFailed(false);setError('');
-  // Read-only requests can start with the session check. Publish their results only
-  // through refresh after authentication succeeds, and consume them only once.
-  const initial={history:api<HistoryPage>('history'),metadata:api<ConversationState[]>('conversations')};
+  // This authenticated response supplies both rows and removal/pin/read state.
+  // Old hosts omit conversations; retain their separate metadata endpoint.
+  const history=api<HistoryPage>('history?startup=1');
+  const metadata=history.then(data=>data.conversations??api<ConversationState[]>('conversations'));
+  const initial={history,metadata};
   firstLoad.current=initial;
-  void Promise.allSettled([initial.history,initial.metadata]);
-  api('status').then(()=>{if(alive)setPaired(true)}).catch(e=>{
+  Promise.all([history,metadata]).then(()=>{if(alive)setPaired(true)}).catch(e=>{
    if(firstLoad.current===initial)firstLoad.current=null;
    if(!alive)return;
    if(e instanceof ApiError&&e.status===401)setPaired(false);

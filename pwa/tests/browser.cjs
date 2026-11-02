@@ -13,13 +13,13 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  let startupGate=null;
  const startupRequests=[];
  await page.route('**/api/**',async route=>{const p=new URL(route.request().url()).pathname;let data={};let status=200;
- if(startupGate){startupRequests.push(p);if(p==='/api/status')await startupGate.promise;}
+ if(startupGate){startupRequests.push(p);if(p==='/api/history')await startupGate.promise;}
 
  if(p==='/api/pair'){data={status:'pending'}}else if(p==='/api/pair/finish'){paired=true;data={status:'ok'}}else if(!paired){status=401}
  else if(p==='/api/status'){data={publicConnectivity:'unverified'}}
  else if(p==='/api/phones'){data=[{id:'server',name:'服务器手机'}]}
  else if(p==='/api/sims'){data=[{id:1,lineId:'fixture-stable-one',name:'服务器手机 · 中国联通',phoneId:'server',phoneName:'服务器手机',slot:1,simName:'中国联通'},{id:2,lineId:'fixture-stable-two',name:'服务器手机 · 备用线路',phoneId:'server',phoneName:'服务器手机',slot:2,simName:'备用线路'},{id:10009,lineId:'fixture-peer-same-slot',name:'共享设备 · 卡 1',phoneId:'fixture-peer',phoneName:'共享设备',slot:1,simName:'卡 1',online:peerAvailable}]}
- else if(p==='/api/history'){if(historyFails)status=500;data={items:[{id:'sms:1',address:'13800138000',body:'这是一条用于界面验证的测试短信。',date:Date.now(),incoming:true,read:false,sim:1,state:'received'}],next:null}}
+ else if(p==='/api/history'){if(historyFails)status=500;data={items:[{id:'sms:1',address:'13800138000',body:'这是一条用于界面验证的测试短信。',date:Date.now(),incoming:true,read:false,sim:1,state:'received'}],next:null,...(new URL(route.request().url()).searchParams.get('startup')==='1'?{conversations:[]}:{} )}}
  else if(p==='/api/conversations'){data=[]}
  else if(p==='/api/outgoing'){data=failedMessage?[failedMessage]:[]}
  else if(p==='/api/send'){const body=route.request().postDataJSON();assert.equal(body.lineId,requestedLine);assert.equal(body.sim,undefined);ids.push(body.id);if(failSend){failSend=false;await route.abort('failed');return}accepted.add(body.id);data={state:'accepted'}}
@@ -55,19 +55,23 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  startupGate={promise:new Promise(resolve=>{releaseStatus=resolve})};
  await page.reload({waitUntil:'domcontentloaded'});
  await page.waitForFunction(()=>document.querySelector('h1'));
- for(let i=0;i<40&&!['/api/status','/api/history','/api/conversations'].every(p=>startupRequests.includes(p));i++)
-  await new Promise(resolve=>setTimeout(resolve,25));
- assert.ok(['/api/status','/api/history','/api/conversations'].every(p=>startupRequests.includes(p)),
-  'Read-only startup requests must be in flight before the session check completes');
+ for(let i=0;i<40&&!startupRequests.includes('/api/history');i++)await new Promise(resolve=>setTimeout(resolve,25));
+ assert.equal(startupRequests.filter(p=>p==='/api/history').length,1);
+ assert.equal(startupRequests.includes('/api/status'),false,'Initial history is already authenticated');
+ assert.equal(startupRequests.includes('/api/conversations'),false,'Startup metadata shares the initial response');
  assert.equal(await page.getByText('138 0013 8000',{exact:true}).count(),0,'Authenticated rows stay hidden before the session check');
  assert.equal(await page.getByLabel('安卓显示的配对码').count(),0,'Pending session must not display the pairing form');
  assert.equal(await page.getByRole('region',{name:'正在连接手机'}).count(),1);
+ const storage=await page.evaluate(async()=>JSON.stringify({local:{...localStorage},session:{...sessionStorage},databases:await indexedDB.databases()}));
+ assert.equal(storage.includes('这是一条用于界面验证的测试短信。'),false,'SMS content is not persisted');
+ assert.equal(await page.evaluate(async()=>(await indexedDB.databases()).length),0,'No message IndexedDB cache');
+
  releaseStatus();
  await page.getByText('138 0013 8000',{exact:true}).waitFor();
  assert.equal(startupRequests.filter(p=>p==='/api/history').length,1);
- assert.equal(startupRequests.filter(p=>p==='/api/conversations').length,1);
+ assert.equal(startupRequests.filter(p=>p==='/api/conversations').length,0);
  startupGate=null;
- console.log('PASS parallel startup with a blocked session check and no duplicate initial inbox requests');
+ console.log('PASS single authenticated startup response, no status/metadata round trips or duplicate inbox reads');
  console.log('PASS: pairing, two SIM choices, history, safe timeout retry, accepted-not-delivered state, mobile overflow, no JS errors');
  }finally{await browser.close();server.close()}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});

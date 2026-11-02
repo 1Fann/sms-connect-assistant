@@ -29,6 +29,9 @@ class DirectoryAccessActivity: AppCompatActivity() {
         val layout=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(28,28,28,28)}
         setContentView(ScrollView(this).apply{addView(layout)})
         layout.addView(TextView(this).apply{text="逐项选择允许主节点同步的数据。网页编辑会修改这台手机的系统通讯录，仅在开启远程编辑后执行。系统可能限制通话记录权限。"})
+        getSharedPreferences("directory-sync",0).getString("contact-error",null)?.let{message->
+            layout.addView(TextView(this).apply{text=message;setTextColor(android.graphics.Color.rgb(220,55,45))})
+        }
         for((index,key) in permissions.keys.withIndex()){
             val permission=permissions.getValue(key)
             val label=titles.getValue(key)

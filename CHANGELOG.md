@@ -1,5 +1,11 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev14 · 通讯录读取兼容修复
+
+- 兼容拒绝 Data.IS_READ_ONLY 投影的通讯录 Provider，保留原始账号只读、版本及批处理行数保护。
+- 同步异常仅保存不含联系人内容的提示；网页读取失败时不再显示“通讯录为空”。
+- Handle providers that reject the field-level read-only projection without bypassing account or transactional write guards. Surface sanitized scan failures rather than an empty address book. See [release notes](docs/releases/0.9.0-dev14.md).
+
 ## 0.9.0-dev13 · 安卓通讯录为准
 
 - 移除 iPhone 导入、姓名修复、助手名片合并/拆分及最近删除入口；只展示安卓系统联系人，旧助手数据保留但不再参与姓名匹配。

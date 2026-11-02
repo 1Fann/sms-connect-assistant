@@ -42,7 +42,7 @@ internal class AndroidDirectory(private val service:DirectoryService) {
   val items=cards(allowed).asSequence().filter{!favorite||it.getBoolean("favorite")}
    .filter{q.isEmpty()||it.getString("name").contains(q,true)||it.getJSONArray("numbers").strings().any{n->n.contains(q)}}
    .sortedBy{it.getString("id")}.drop(offset).take(51).toList()
-  return JSONObject().put("items",JSONArray(items.take(50))).put("next",if(items.size>50)offset+50 else JSONObject.NULL)
+  return JSONObject().put("items",JSONArray(items.take(50))).put("next",if(items.size>50)offset+50 else JSONObject.NULL).put("syncError",service.contactReadError(allowed))
  }
  fun resolve(number:String,allowed:(String)->Boolean):String? {
   val key=lookupKey(service.regionCode(),number)?:return null

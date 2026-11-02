@@ -55,24 +55,49 @@ class NativeProviderTest {
   fake.marker=false;fake.version="1"
   assertEquals("denied",provider.apply("isolated",operation,{false},{true}).getString("state"));assertEquals(0,fake.batches)
  }
+
+ @Test fun unsupportedReadOnlyProjectionFallsBackWithoutLosingContactRows(){
+  fake.rejectReadOnlyProjection=true
+  val row=snapshot();assertEquals("Android Display",row.getString("displayName"));assertEquals(1,row.getJSONArray("numbers").length())
+  assertEquals("done",provider.apply("isolated",job(row),{true},{true}).getString("state"))
+  assertEquals(1,fake.rejectedProjections);assertEquals(1,fake.completedBatches)
+ }
+ @Test fun fallbackDoesNotBypassReadonlyRawAccountsOrProviderEnforcedReadonlyFields(){
+  fake.rejectReadOnlyProjection=true;fake.rawReadOnly=1
+  val row=snapshot();assertTrue(row.getBoolean("readOnly"))
+  assertEquals("denied",provider.apply("isolated",job(row),{true},{true}).getString("state"));assertEquals(0,fake.batches)
+  fake.rawReadOnly=0;val fresh=snapshot();fake.rejectBatch=true
+  assertEquals("conflict",provider.apply("isolated",job(fresh),{true},{true}).getString("state"));assertEquals(0,fake.completedBatches)
+ }
+ @Test fun supportedReadonlyFieldsRemainProtectedAndUnrelatedErrorsAreNotSwallowed(){
+  fake.dataReadOnly=1;val row=snapshot();assertTrue(row.getBoolean("readOnly"))
+  assertEquals("denied",provider.apply("isolated",job(row),{true},{true}).getString("state"));assertEquals(0,fake.batches)
+  fake.failOtherProjection=true
+  assertTrue(runCatching{snapshot()}.exceptionOrNull() is IllegalArgumentException);assertEquals(0,fake.rejectedProjections)
+ }
  private class Fake:DirectoryContent {
-  var display="Android Display";var version="1";var marker=false;var batches=0
+  var display="Android Display";var version="1";var marker=false;var batches=0;var completedBatches=0
+  var rejectReadOnlyProjection=false;var rejectedProjections=0;var failOtherProjection=false;var dataReadOnly=0;var rawReadOnly=0;var rejectBatch=false
   var last:List<ContentProviderOperation> = emptyList()
   override fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?):Cursor {
+   if(uri.path=="/data"){
+    if(failOtherProjection)throw IllegalArgumentException("Invalid column unrelated_field")
+    if(rejectReadOnlyProjection&&"is_read_only" in columns){rejectedProjections++;throw IllegalArgumentException("Invalid column is_read_only")}
+   }
    val cursor=MatrixCursor(columns)
    fun row(values:Map<String,Any?>){cursor.addRow(columns.map{values[it]}.toTypedArray())}
    when(uri.path){
     "/contacts"->row(mapOf("display_name" to display,"name_raw_contact_id" to "1"))
-    "/raw_contacts"->if(where?.contains("version=?")!=true||args?.last()==version)row(mapOf("_id" to "1","version" to version,"contact_id" to "5","raw_contact_is_read_only" to 0,"account_type" to null,"account_name" to null,"sourceid" to null))
+    "/raw_contacts"->if(where?.contains("version=?")!=true||args?.last()==version)row(mapOf("_id" to "1","version" to version,"contact_id" to "5","raw_contact_is_read_only" to rawReadOnly,"account_type" to null,"account_name" to null,"sourceid" to null))
     "/data"->when {
      args?.firstOrNull()?.startsWith("vnd.android.cursor.item/vnd.me.capcom.commlink.operation")==true->{if(marker)row(mapOf("raw_contact_id" to "1"))}
      columns.contentEquals(arrayOf("data15"))->{}
      where?.contains(" IN ")==true->{
-      row(mapOf("mimetype" to StructuredName.CONTENT_ITEM_TYPE,"data1" to "Raw Display","is_read_only" to 0))
-      row(mapOf("mimetype" to Phone.CONTENT_ITEM_TYPE,"data1" to "+16502530000","is_read_only" to 0))
+      row(mapOf("mimetype" to StructuredName.CONTENT_ITEM_TYPE,"data1" to "Raw Display","is_read_only" to dataReadOnly))
+      row(mapOf("mimetype" to Phone.CONTENT_ITEM_TYPE,"data1" to "+16502530000","is_read_only" to dataReadOnly))
      }
-     args?.lastOrNull()==StructuredName.CONTENT_ITEM_TYPE->row(mapOf("_id" to "10","is_read_only" to 0))
-     args?.lastOrNull()==Phone.CONTENT_ITEM_TYPE->row(mapOf("_id" to "11","data1" to "+16502530000","is_read_only" to 0))
+     args?.lastOrNull()==StructuredName.CONTENT_ITEM_TYPE->row(mapOf("_id" to "10","is_read_only" to dataReadOnly))
+     args?.lastOrNull()==Phone.CONTENT_ITEM_TYPE->row(mapOf("_id" to "11","data1" to "+16502530000","is_read_only" to dataReadOnly))
     }
     else->error("Unexpected fake URI")
    }
@@ -80,6 +105,8 @@ class NativeProviderTest {
   }
   override fun applyBatch(authority:String,ops:ArrayList<ContentProviderOperation>):Array<ContentProviderResult>{
    assertEquals(ContactsContract.AUTHORITY,authority);batches++;last=ops.toList()
+   if(rejectBatch)throw android.content.OperationApplicationException("Expected one writable row")
+   completedBatches++
    return ops.map{ContentProviderResult(1)}.toTypedArray()
   }
  }

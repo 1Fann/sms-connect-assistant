@@ -92,7 +92,20 @@ class PeerDirectoryAgent(context:Context, private val link:String) {
         executor.execute {
             try {
                 if(!stillLinked())return@execute
-                if(contacts)runCatching{scan("contact")}
+                if(contacts){
+                    val status=ctx.getSharedPreferences("directory-sync",0)
+                    runCatching{scan("contact")}.onSuccess{
+                        status.edit().remove("contact-error").putLong("contact-checked",System.currentTimeMillis()).apply()
+                    }.onFailure{error->
+                        // Do not persist Throwable text: OEM exceptions can include contact data.
+                        val message=when(error){
+                            is SecurityException->"系统拒绝读取联系人，请检查安卓权限"
+                            is IllegalArgumentException->"系统通讯录接口不兼容，联系人同步尚未完成"
+                            else->"暂时无法读取安卓通讯录，正在自动重试"
+                        }
+                        status.edit().putString("contact-error",message).putLong("contact-checked",System.currentTimeMillis()).apply()
+                    }
+                }
                 if(calls)runCatching{scan("call")}
             } finally { synchronized(inFlight){inFlight.remove(link)} }
         }

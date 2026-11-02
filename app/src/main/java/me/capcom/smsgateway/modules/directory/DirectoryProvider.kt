@@ -52,6 +52,23 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
     private fun query(uri: Uri, columns: Array<String>, where: String?, args: Array<String>?) =
         checkNotNull(content.query(uri, columns, where, args)) { "系统数据源不可用" }
 
+    @Volatile private var dataReadOnlyColumn=true
+    /** Some OEM providers reject this optional projection. Never impersonate a sync adapter:
+     * retain raw-account guards and exact affected-row checks so Provider-enforced read-only
+     * fields still roll back the entire write batch. */
+    private fun queryData(columns:Array<String>,where:String,args:Array<String>):Cursor {
+        val wanted=if(dataReadOnlyColumn)columns else columns.filter{it!=Data.IS_READ_ONLY}.toTypedArray()
+        return try { query(Data.CONTENT_URI,wanted,where,args) }
+        catch(error:IllegalArgumentException){
+            if(Data.IS_READ_ONLY !in wanted || !error.message.orEmpty().contains(Data.IS_READ_ONLY,true))throw error
+            val fallback=query(Data.CONTENT_URI,wanted.filter{it!=Data.IS_READ_ONLY}.toTypedArray(),where,args)
+            dataReadOnlyColumn=false
+            fallback
+        }
+    }
+    private fun fieldReadOnly(cursor:Cursor):Boolean =
+        cursor.getColumnIndex(Data.IS_READ_ONLY).let{it>=0&&!cursor.isNull(it)&&cursor.getInt(it)!=0}
+
     private fun aggregateName(contactId:String):Pair<String,String> =
         query(ContactsContract.Contacts.CONTENT_URI,arrayOf(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,ContactsContract.Contacts.NAME_RAW_CONTACT_ID),
             "_id=?",arrayOf(contactId)).use { c ->
@@ -78,11 +95,11 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
                     .put("revision",stamp).put("readOnly",raw.getInt(3) != 0)
                 val numbers = linkedSetOf<String>()
                 var name = ""
-                query(Data.CONTENT_URI, arrayOf(Data.MIMETYPE,Data.DATA1,Data.IS_READ_ONLY),
+                queryData(arrayOf(Data.MIMETYPE,Data.DATA1,Data.IS_READ_ONLY),
                     "raw_contact_id=? AND mimetype IN (?,?)", arrayOf(id,Phone.CONTENT_ITEM_TYPE,StructuredName.CONTENT_ITEM_TYPE)).use { fields ->
                     while (fields.moveToNext()) {
                         val value = fields.getString(1).orEmpty()
-                        if (fields.getInt(2) != 0) data.put("readOnly",true)
+                        if (fieldReadOnly(fields)) data.put("readOnly",true)
                         if (fields.getString(0) == Phone.CONTENT_ITEM_TYPE && value.isNotBlank()) numbers.add(value)
                         if (fields.getString(0) == StructuredName.CONTENT_ITEM_TYPE) name = value
                     }
@@ -182,6 +199,10 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
                     .withExpectedCount(1).build())
             }
             if(action=="delete") {
+                queryData(arrayOf(Data._ID,Data.IS_READ_ONLY),"raw_contact_id=?",arrayOf(raw)).use{c->
+                    if(c.getColumnIndex(Data.IS_READ_ONLY)<0)return result("denied","系统不支持核实字段只读状态，不能安全删除来源")
+                    while(c.moveToNext())if(fieldReadOnly(c))return result("denied","此来源包含只读字段")
+                }
                 ops.add(Op.newAssertQuery(Data.CONTENT_URI)
                     .withSelection("raw_contact_id=? AND is_read_only=1",arrayOf(raw))
                     .withExpectedCount(0).build())
@@ -201,10 +222,10 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
             if(payload.has("name")) {
                 val name=payload.getString("name")
                 if(!create){
-                    query(Data.CONTENT_URI,arrayOf(Data._ID,Data.IS_READ_ONLY),"raw_contact_id=? AND mimetype=?",
+                    queryData(arrayOf(Data._ID,Data.IS_READ_ONLY),"raw_contact_id=? AND mimetype=?",
                         arrayOf(raw,StructuredName.CONTENT_ITEM_TYPE)).use { c->
                         if(c.moveToFirst()){
-                            if(c.getInt(1)!=0)return result("denied","姓名字段只读")
+                            if(fieldReadOnly(c))return result("denied","姓名字段只读")
                             ops.add(Op.newUpdate(Data.CONTENT_URI).withSelection("_id=?",arrayOf(c.getString(0))).withValue(StructuredName.DISPLAY_NAME,name).withExpectedCount(1).build())
                         } else ops.add(insert(StructuredName.CONTENT_ITEM_TYPE,name))
                     }
@@ -213,12 +234,12 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
             if(payload.has("numbers")){
                 val desired=payload.getJSONArray("numbers").strings().toSet()
                 val missing=desired.toMutableSet()
-                if(!create)query(Data.CONTENT_URI,arrayOf(Data._ID,Phone.NUMBER,Data.IS_READ_ONLY),"raw_contact_id=? AND mimetype=?",
+                if(!create)queryData(arrayOf(Data._ID,Phone.NUMBER,Data.IS_READ_ONLY),"raw_contact_id=? AND mimetype=?",
                     arrayOf(raw,Phone.CONTENT_ITEM_TYPE)).use { c->
                     while(c.moveToNext()){
                         if(c.getString(1) in desired)missing.remove(c.getString(1))
                         else {
-                            if(c.getInt(2)!=0)return result("denied","号码字段只读")
+                            if(fieldReadOnly(c))return result("denied","号码字段只读")
                             ops.add(Op.newDelete(Data.CONTENT_URI).withSelection("_id=?",arrayOf(c.getString(0))).withExpectedCount(1).build())
                         }
                     }

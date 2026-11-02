@@ -44,3 +44,15 @@ Create selects one explicit device and creates a local Android contact. Edit/app
 The schema stays at v3. Public GET contacts returns native cards; new POST contacts/native/create|edit|favorite routes require explicit Android destination. Unexecuted legacy assistant write jobs are retired on startup; completed receipts and native jobs are preserved. Legacy assistant writes return 410, so cached old pages cannot silently modify system contacts. Existing device deltas, durable jobs, call records and missed-call view receipts are preserved.
 
 Reference: [Android Contacts API](https://developer.android.com/reference/android/provider/ContactsContract.Contacts).
+
+## dev14 · OEM 字段兼容 / Provider projection compatibility
+
+部分系统的 Data 查询会拒绝 is_read_only 投影，并返回 IllegalArgumentException。仅遇到明确指向这个字段的异常时，重试不含该字段的查询，并记住当前 Provider 实例的能力；其他查询错误不吞掉，扫描失败不提交残缺快照或删除联系人。读取仍保留 RawContacts 账号只读标记。
+
+写入仍检查原始账号只读状态、来源版本、账号绑定和当前授权；支持字段只读查询时继续检查。字段状态不可投影时不冒充同步适配器，使用普通 Provider 权限和每条修改/删除的精确影响行数约束。系统拒绝只读行导致批处理失败时，不报告成功。旧的整个来源删除在无法核实字段状态时直接拒绝；当前网页本就不提供该删除入口。
+
+联系人扫描失败会保存固定、不含原异常文本的提示，安卓授权页及网页可见。contacts 响应可附 syncError（仅授权本机设备时可见）；有错误时网页不再把失败表现为“系统通讯录暂无联系人”。成功扫描后清除错误。
+
+Some providers reject the is_read_only projection. Retry without that single column only for an explicit matching error; unrelated failures remain failures and cannot commit partial scans. Raw-account read-only flags, revisions, account binding, current authorization, normal caller privileges and exact affected-row checks continue to protect writes. Unsupported whole-source deletion fails closed. Sanitized scan errors are shown instead of an empty-book claim and clear after successful reads.
+
+Reference: [Android field-level read-only contract](https://developer.android.com/reference/android/provider/ContactsContract.DataColumns#IS_READ_ONLY).

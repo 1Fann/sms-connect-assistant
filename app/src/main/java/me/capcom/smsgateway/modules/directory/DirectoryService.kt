@@ -162,6 +162,9 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
     fun resolveName(number:String,allowedDevice:(String)->Boolean={true}):String? =
         AndroidDirectory(this).resolve(number,allowedDevice)
 
+    internal fun contactReadError(allowed:(String)->Boolean):String? =
+        if(allowed("server")&&deviceAccess("server").optBoolean("contactsRead"))
+            ctx.getSharedPreferences("directory-sync",0).getString("contact-error",null) else null
     internal fun regionCode()=region
     fun androidContacts(query:String,offset:Int,allowed:(String)->Boolean,favorite:Boolean=false)=AndroidDirectory(this).list(query,offset,allowed,favorite)
     fun androidContact(id:String,allowed:(String)->Boolean)=AndroidDirectory(this).view(id,allowed)

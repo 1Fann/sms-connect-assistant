@@ -16,7 +16,7 @@ const server=http.createServer((req,res)=>{
  const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});const writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
 
- let state='queued',reads=0;const mutations=[];
+ let state='queued',reads=0,nativeEmpty=false,scanError='';const mutations=[];
  const row={id:'android-card',deviceId:'B',name:'安卓演示',numbers:['5550100'],revision:8,favorite:false,conflict:true,primaryRawId:'raw-7',
   sources:[{deviceId:'B',rawId:'raw-7',contactId:'11',revision:'native-v1',name:'安卓演示',numbers:['5550100'],readOnly:false}]};
  await page.route('**/api/**',async route=>{
@@ -30,7 +30,7 @@ const server=http.createServer((req,res)=>{
    reads++;return route.fulfill({contentType:'application/json',body:JSON.stringify({items:[{id:'job',state,detail:state==='denied'?'安卓未允许远程编辑':''}]})});
   }
   const data={session:{installationId:'native',permissions:['contacts.read','contacts.write']},devices:[{deviceId:'A',name:'主机',online:true,contactsWrite:true},{deviceId:'B',name:'另一手机',online:false,contactsWrite:true}],
-   lines:[],'call-history/missed':{count:0},'voice/history':[],contacts:{items:[row],next:null}};
+   lines:[],'call-history/missed':{count:0},'voice/history':[],contacts:{items:nativeEmpty?[]:[row],next:null,syncError:scanError}};
   assert.ok(endpoint in data);
   return route.fulfill({contentType:'application/json',body:JSON.stringify(data[endpoint])});
  });
@@ -61,6 +61,16 @@ const server=http.createServer((req,res)=>{
  await page.getByRole('button',{name:'完成',exact:true}).click();
  await page.getByRole('alert').filter({hasText:'安卓未允许远程编辑'}).waitFor();
  assert.equal(mutations.length,2);assert.ok(await page.getByRole('dialog',{name:'新建联系人',exact:true}).isVisible());
+ await page.locator('.call-contact-editor').getByRole('button',{name:'返回',exact:true}).click();
+ nativeEmpty=true;scanError='系统通讯录接口不兼容，联系人同步尚未完成';
+ await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
+ await page.locator('nav button').filter({hasText:'联系人'}).click();
+ await page.getByRole('alert').filter({hasText:scanError}).waitFor();
+ assert.equal(await page.getByText(/安卓系统通讯录暂无联系人/).count(),0,'A failed read must not be presented as an empty address book');
+ nativeEmpty=false;scanError='';
+ await page.getByRole('button',{name:'刷新',exact:true}).click();
+ await page.getByRole('button',{name:/安卓演示/}).waitFor();
+ assert.equal(await page.getByRole('alert').count(),0);
  assert.deepEqual(errors,[]);
  console.log('PASS removed import/merge/review workflows, explicit device selection with no fallback, queued is not saved, Provider receipt gates success and denial stays visible');
  }finally{await browser.close();server.close()}

@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev26 · 短信启动与联系人优化
+
+- 短信界面缓存优先显示，后台先准备版本资源再替换页面；更新中断时保留完整旧版，不缓存认证 API、短信正文或凭据。
+- 会话首次读取并行进行；安卓页内复用姓名、号码格式与 SIM 查询，并批量匹配通讯录。
+- 包含 dev16–dev24 保留的联系人号码排序、写回优先处理、系统电话键盘和点空白收起等调整。联系人编辑键盘仍可能在部分 iPhone 上闪动，不宣称已完全解决。
+- Cached Messages startup, complete background shell updates, parallel initial reads and batch sender-name resolution. Includes retained contact ordering, write-back and system-keyboard refinements. See [release notes](docs/releases/0.9.0-dev26.md).
+
 ## 0.9.0-dev15 · 互联电话联系人界面
 
 - 依照用户提供的录屏调整联系人列表、详情和编辑页。字母索引支持拖动，详情支持选择号码发短信或拨号，编辑页逐行增删电话。

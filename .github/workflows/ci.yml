@@ -26,6 +26,7 @@ jobs:
           pnpm test
           node tests/push-preview.cjs
           node tests/dual-shell.cjs
+          node tests/shell-cache.cjs
           pnpm build
       - uses: actions/setup-java@v4
         with:

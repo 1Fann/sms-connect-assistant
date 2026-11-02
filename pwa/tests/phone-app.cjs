@@ -177,6 +177,14 @@ const server=http.createServer((req,res)=>{
        stage+' moved '+key+' from '+JSON.stringify(before[key])+' to '+JSON.stringify(after[key]));
    }
  }
+ async function assertOneKeyboardInset(idlePadTop,stage){
+   const {bottom,visible}=await editor.evaluate(form=>({
+     bottom:form.querySelector('.ios-editor-scroll').getBoundingClientRect().bottom-window.fixtureVV.offsetTop,
+     visible:window.fixtureVV.height,
+   }));
+   const expected=Math.min(idlePadTop,visible);
+   assert.ok(Math.abs(bottom-expected)<=2,stage+' has a form bottom of '+bottom+'; expected '+expected);
+ }
  await sheet.getByRole('button',{name:'编辑',exact:true}).click();
  const shortFrame=await editorFrame();
  const nameField=editor.getByLabel('姓名',{exact:true});
@@ -234,10 +242,78 @@ const server=http.createServer((req,res)=>{
  await viewport(844,0);
  assert.ok(await numberPad.isHidden(),'Viewport events must not reopen a dismissed keypad');
  await shortPhone.click();
- await numberPad.waitFor();
- await editor.getByLabel('姓名',{exact:true}).click();
- await numberPad.waitFor({state:'hidden'});
+ await visibleAbovePad(true);
+ const idlePadTop=(await numberPad.boundingBox()).y;
+ const lastValue=await shortPhone.inputValue();
+ // Focus switches immediately, but Safari may deliver its first keyboard resize much later.
+ await nameField.click();
+ const retained=await editor.evaluate(form=>{
+   const pad=form.querySelector('.phone-number-pad');
+   const key=pad?.querySelector('button');
+   if(!key||!key.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return null;
+   const r=key.getBoundingClientRect();
+   const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+   return {top:pad.getBoundingClientRect().top,
+     blocked:!!key.disabled||!!key.closest('[inert]')||!key.contains(hit)};
+ });
+ assert.ok(retained,'Phone-to-name switch left a blank frame before Safari reported the native keyboard');
+ assert.ok(Math.abs(retained.top-idlePadTop)<=2,'The outgoing key surface should stay in place');
+ assert.ok(retained.blocked,'The outgoing keys must no longer edit the previous number');
+ assert.equal(await nameField.evaluate(el=>el===document.activeElement),true);
+ await assertOneKeyboardInset(idlePadTop,'Waiting for the native keyboard');
+ await assertStill(shortFrame,'First frame of phone-to-name handoff');
+ await viewport(725,13);
+ const incoming=await editor.locator('.phone-number-pad').boundingBox();
+ assert.ok(incoming && Math.abs(incoming.y-13-idlePadTop)<=2,
+   'Outgoing keys should remain behind the partially raised native keyboard');
+ await assertOneKeyboardInset(idlePadTop,'Native keyboard has only partially covered the number pad');
  await keyboardGeometry(492,24,true);
+ await editor.locator('.phone-number-pad').waitFor({state:'hidden',timeout:2500});
+ assert.equal(await shortPhone.inputValue(),lastValue);
+ // The reverse handoff starts while the old native keyboard is still fully visible.
+ // Then it shrinks through the web keypad's height. Never reserve both heights.
+ await shortPhone.click();
+ await assertStill(shortFrame,'Phone focus before Safari starts hiding the native keyboard');
+ await assertOneKeyboardInset(idlePadTop,'Native keyboard still fully open');
+ await viewport(720,18);
+ await assertStill(shortFrame,'Changing partial native occlusion');
+ await assertOneKeyboardInset(idlePadTop,'Native keyboard partially closed');
+ await viewport(844,0);
+ await visibleAbovePad(true);
+ await assertStill(shortFrame,'Phone keypad finished taking over');
+ // A hardware keyboard can focus the name without causing any visualViewport resize.
+ await nameField.click();
+ await editor.locator('.phone-number-pad').waitFor({state:'hidden',timeout:2500});
+ assert.equal(await nameField.evaluate(el=>el===document.activeElement),true);
+ await assertStill(shortFrame,'Native keyboard did not appear');
+ await shortPhone.click();
+ const staleKey=await padKey('2').boundingBox();
+ await nameField.click();
+ await page.touchscreen.tap(staleKey.x+staleKey.width/2,staleKey.y+staleKey.height/2);
+ assert.equal(await shortPhone.inputValue(),lastValue,'A tap on the outgoing keyboard must not edit the old number');
+ await nameField.focus();
+ // A short form scrolled to its end can lose its scroll range when the incoming
+ // keyboard is smaller. An already visible number/name must not jump as a result.
+ await keyboardGeometry(460,32,false);
+ await panel.hover();
+ await page.mouse.wheel(0,1800);
+ await page.waitForFunction(()=>{
+   const p=document.querySelector('.ios-editor-scroll');
+   return p.scrollTop>0 && p.scrollHeight-p.clientHeight-p.scrollTop<=2;
+ });
+ const endFrame=await editorFrame();
+ await shortPhone.click();
+ await viewport(735,18);
+ await assertOneKeyboardInset(idlePadTop,'At the end of a short form');
+ await assertStill(endFrame,'Shorter phone keypad after scrolling to the end');
+ await viewport(844,0);
+ await visibleAbovePad(false);
+ await assertStill(endFrame,'Scroll is retained after a shorter phone keypad takes over');
+ await nameField.click();
+ await viewport(675,12);
+ await editor.locator('.phone-number-pad').waitFor({state:'hidden',timeout:2500});
+ await assertStill(endFrame,'Shorter native keyboard after scrolling to the end');
+ await nameField.blur();
  await viewport(844,0);
  await editor.getByRole('button',{name:'取消',exact:true}).click();
  await sheet.getByRole('button',{name:'返回',exact:true}).click();
@@ -250,6 +326,15 @@ const server=http.createServer((req,res)=>{
  await nameField.click();
  await keyboardGeometry(492,24,false);
  await assertStill(scrolledFrame,'Opening the keyboard on an already visible field in a scrolled form');
+ await editor.getByLabel('联系人电话号码',{exact:true}).click();
+ await assertStill(scrolledFrame,'Switching a scrolled form while the native keyboard is open');
+ await assertOneKeyboardInset(idlePadTop,'Scrolled name-to-phone handoff');
+ await viewport(844,0);
+ await visibleAbovePad(false);
+ await nameField.click();
+ await assertStill(scrolledFrame,'Switching back to name before the native keyboard reports its inset');
+ await keyboardGeometry(492,24,false);
+ await assertStill(scrolledFrame,'Restored native keyboard on a scrolled form');
  await nameField.blur();
  await viewport(844,0);
  await assertStill(scrolledFrame,'Closing the keyboard in a scrolled form');
@@ -345,6 +430,6 @@ const server=http.createServer((req,res)=>{
  await page.locator('nav button').filter({hasText:'联系人'}).click();await openCard(row.name);
  if(await editButton.count())assert.ok(await editButton.isDisabled(),'Read-only installations cannot open a write editor');
  assert.equal(writes.length,1);assert.deepEqual(errors,[]);
- console.log('PASS contact list and number actions, stable editor geometry through keyboard opening, panning and dismissal, cancellation, versioned save and read-only capability');
+ console.log('PASS contact list and number actions, keyboard handoff with one inset, inert outgoing keys, hardware timeout, preserved scroll, cancellation, versioned save and read-only capability');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

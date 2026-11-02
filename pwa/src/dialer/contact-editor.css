@@ -11,8 +11,6 @@
   margin-inline: auto;
   width: min(100%,600px);
   padding: 0;
-  /* Keep painting below the native keyboard. Only the flex content area shrinks. */
-  padding-bottom: var(--phone-keyboard,0px);
   border: none;
   color: var(--ink);
   background: var(--editor-page);
@@ -114,6 +112,17 @@
   padding: 0 var(--editor-side) calc(env(safe-area-inset-bottom,0px) + 22px);
   scroll-padding-block: 12px;
 }
+/* Both keyboards occupy the same bottom edge. A native keyboard in flight
+   and the web number pad must reserve the larger of their heights, only once. */
+.ios-editor-keyboard-slot {
+  flex: none;
+  min-height: var(--phone-keyboard,0px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.ios-editor-keyboard-slot[inert] {pointer-events: none}
+.ios-editor-fields {display: flow-root; min-height: calc(100% + var(--preserved-scroll))}
 .ios-editor-scroll::-webkit-scrollbar {display: none}
 .ios-editor-edit .ios-editor-scroll {padding-bottom: calc(env(safe-area-inset-bottom,0px) + 92px)}
 html[data-keyboard-open=true] .ios-editor .ios-editor-scroll,
@@ -285,7 +294,7 @@ body:has(.ios-editor-edit) {background-color: var(--editor-page)}
   color: var(--ink);
 }
 .ios-phone-add span {background: #34c759}
-.ios-editor-caption, .ios-editor-scroll > p[role=status], .ios-editor-scroll > p[role=alert] {
+.ios-editor-caption, .ios-editor-fields > p[role=status], .ios-editor-fields > p[role=alert] {
   margin: 10px 6px;
   color: var(--editor-muted);
   font-size: 13px;

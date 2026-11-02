@@ -81,14 +81,28 @@ export function useContactEditorViewport(dialog:RefObject<HTMLElement|null>,keyb
       unlockTimer=window.setTimeout(unlock,700);
     }
     const viewport=window.visualViewport;
-    let lastPageTop:number|undefined;
+    let pan=0,lastPageTop:number|undefined;
+    let positionFrame=0,sampleUntil=0;
     function placeEditor() {
       if(viewport && Math.abs(viewport.scale-1)>.01)return;
-      const top=viewport?.pageTop ?? (window.scrollY+(viewport?.offsetTop??0));
+      const scroll=window.scrollY;
+      if(viewport){
+        const offset=viewport.offsetTop;
+        const fromPage=viewport.pageTop-scroll;
+        // These describe the same displacement. During an iOS keyboard transition
+        // one reading may already describe the destination while the other is still at rest.
+        if(Number.isFinite(offset) && Math.abs(fromPage-offset)<=1)pan=offset;
+      }
+      const top=scroll+pan;
       if(Number.isFinite(top) && top!==lastPageTop){
         lastPageTop=top;
         document.body.style.setProperty('--editor-page-top',top+'px');
       }
+    }
+    function samplePosition() {
+      positionFrame=0;
+      placeEditor();
+      if(performance.now()<sampleUntil)positionFrame=requestAnimationFrame(samplePosition);
     }
 
     function remember(field:EventTarget|null) {
@@ -175,7 +189,11 @@ export function useContactEditorViewport(dialog:RefObject<HTMLElement|null>,keyb
       }
     }
     const schedule=()=>{if(!frame)frame=requestAnimationFrame(revealField)};
-    const geometryChanged=()=>{placeEditor();hold();schedule()};
+    const geometryChanged=()=>{
+      sampleUntil=performance.now()+500;
+      if(!positionFrame)positionFrame=requestAnimationFrame(samplePosition);
+      hold();schedule();
+    };
     const resize=new ResizeObserver(geometryChanged);
     resize.observe(panel);
     panel.addEventListener('pointerdown',beforeFocus,true);
@@ -188,10 +206,11 @@ export function useContactEditorViewport(dialog:RefObject<HTMLElement|null>,keyb
     window.addEventListener('scroll',geometryChanged,{passive:true});
     viewport?.addEventListener('resize',geometryChanged);
     viewport?.addEventListener('scroll',geometryChanged);
+    placeEditor();
     remember(document.activeElement);
     geometryChanged();
     return ()=>{
-      cancelAnimationFrame(frame);resize.disconnect();unlock();
+      cancelAnimationFrame(frame);cancelAnimationFrame(positionFrame);resize.disconnect();unlock();
       panel.removeEventListener('pointerdown',beforeFocus,true);
       panel.removeEventListener('pointerup',finishTap,true);
       panel.removeEventListener('pointercancel',release);

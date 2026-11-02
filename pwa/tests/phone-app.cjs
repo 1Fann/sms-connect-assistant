@@ -187,6 +187,32 @@ const server=http.createServer((req,res)=>{
    for(const frame of frames.slice(1))assert.ok(frame.every((v,i)=>Math.abs(v-frames[0][i])<=1),
      stage+' moved toolbar/name/phone within one frame: '+JSON.stringify(frames));
  }
+ async function assertSettledPanOnOpen(){
+   const frames=await editor.evaluate(async form=>{
+     const vv=window.fixtureVV;
+     const markers=['.ios-editor-toolbar','.poster-avatar','[data-editor-name]','[data-phone-id]']
+       .map(selector=>form.querySelector(selector));
+     const initial=markers.map(node=>node.getBoundingClientRect().top);
+     const samples=[];
+     // Keep the simulated painted origin independent of either reported value.
+     // This exercises a possible reporting race, not a trace from a real device.
+     for(const [phase,pageTop,offsetTop,paintedPan,notify] of [
+       ['page origin leads',96,0,0,true],['visual offset leads',0,72,0,false],
+       ['silent agreement',24,24,24,false],['page origin returns early',0,24,24,true],
+       ['visual offset returns early',24,0,24,false],['silent return',0,0,0,false],
+     ]){
+       Object.assign(vv,{height:620,offsetTop,pageLag:pageTop-window.scrollY-offsetTop});
+       if(notify)vv.dispatchEvent(new Event('resize'));
+       for(let i=0;i<4;i++){
+         await new Promise(requestAnimationFrame);
+         samples.push({phase,dy:markers.map((node,j)=>Math.round(node.getBoundingClientRect().top-paintedPan-initial[j]))});
+       }
+     }
+     return samples;
+   });
+   const moved=frames.find(sample=>sample.dy.some(d=>Math.abs(d)>1));
+   assert.ok(!moved,'Early or silent viewport samples shifted the editor on screen: '+JSON.stringify(moved));
+ }
  await sheet.getByRole('button',{name:'编辑',exact:true}).click();
  const shortFrame=await editorFrame();
  const restingDockBottom=await page.locator('.phone-dock').evaluate(dock=>dock.getBoundingClientRect().bottom);
@@ -244,6 +270,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(await nameField.getAttribute('data-fixture-focus'),'prevent-scroll','A completed tap should focus in the gesture with preventScroll');
  assert.ok(await nameField.evaluate(field=>field===document.activeElement),'The native name input must own focus');
  await nameField.evaluate(field=>{delete field.focus;field.removeAttribute('data-fixture-focus')});
+ await assertSettledPanOnOpen();
  await viewport(620,12);
  await assertStill(shortFrame,'Opening the name keyboard');
  await assertNoTransientReveal('Initial name keyboard');
@@ -268,8 +295,11 @@ const server=http.createServer((req,res)=>{
  // Here the document itself has also scrolled. A document-coordinate top which
  // uses offsetTop alone would leave the entire editor too high by scrollY.
  const allowRootScroll=await page.addStyleTag({content:'html{overflow-y:auto!important} html::after{content:"";position:absolute;top:1100px;left:0;width:1px;height:1px;pointer-events:none}'});
- await page.evaluate(()=>window.scrollTo(0,32));
+ // The real document starts scrolling before the native page origin catches up.
+ await page.evaluate(()=>{window.fixtureVV.pageLag=-32;window.scrollTo(0,32)});
  await page.waitForFunction(()=>window.scrollY===32);
+ await assertStill({...shortFrame,scroll:[shortFrame.scroll[0],32]},'Real document scroll during a stale pageTop');
+ await page.evaluate(()=>{window.fixtureVV.pageLag=0});
  await viewport(492,64);
  await assertStill({...shortFrame,scroll:[shortFrame.scroll[0],32]},'Visual viewport pageTop includes real document scroll');
  await page.evaluate(()=>window.scrollTo(0,0));
@@ -389,7 +419,10 @@ const server=http.createServer((req,res)=>{
  await keyboardGeometry(552,20,true);
  await assertNoTransientReveal('Switching to the native telephone keyboard');
  await assertStill(shortFrame,'Native telephone keyboard has a different visible height');
+ await shortPhone.blur();
+ await assertDockDismissal();
  await nameField.tap();
+ await assertSettledPanOnOpen();
  assert.equal(await shortPhone.inputValue(),lastValue,'Switching fields must preserve the telephone draft');
  // A short form scrolled to its end can lose its scroll range when the incoming
  // keyboard is smaller. An already visible number/name must not jump as a result.

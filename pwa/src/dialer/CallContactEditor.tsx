@@ -111,6 +111,18 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     if(!panel)return;
     let frame=0;
     let anchor:{field:HTMLInputElement,top:number}|undefined;
+    let tap:{field:HTMLInputElement,id:number,x:number,y:number,at:number}|undefined;
+    let settleUntil=0;
+    const viewport=window.visualViewport;
+    let lastPageTop:number|undefined;
+    function placeEditor() {
+      if(viewport && Math.abs(viewport.scale-1)>.01)return;
+      const top=viewport?.pageTop ?? (window.scrollY+(viewport?.offsetTop??0));
+      if(Number.isFinite(top) && top!==lastPageTop){
+        lastPageTop=top;
+        document.body.style.setProperty('--editor-page-top',top+'px');
+      }
+    }
 
     function remember(field:EventTarget|null) {
       if(field instanceof HTMLInputElement && panel?.contains(field)){
@@ -120,15 +132,34 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
         if(keyboardSlot.current?.offsetHeight)panel.style.setProperty('--preserved-scroll',panel.scrollTop+'px');
       }
     }
+    function inputAt(target:EventTarget|null) {
+      if(!(target instanceof Element))return null;
+      const field=target.closest('input') ?? target.closest('label')?.control;
+      return field instanceof HTMLInputElement && !field.disabled && !field.readOnly ? field : null;
+    }
     function beforeFocus(event:PointerEvent) {
-      const target=event.target as HTMLElement;
-      remember(target.closest('input') ?? target.closest('label')?.control ?? null);
+      tap=undefined;
+      const field=inputAt(event.target);
+      if(!field || !event.isPrimary || event.button!==0 || event.defaultPrevented){release();return}
+      remember(field);
+      if(document.activeElement===field)return;
+      if(event.pointerType==='mouse')field.focus({preventScroll:true});
+      else tap={field,id:event.pointerId,x:event.clientX,y:event.clientY,at:event.timeStamp};
+    }
+    function finishTap(event:PointerEvent) {
+      const start=tap;
+      tap=undefined;
+      if(!start || start.id!==event.pointerId || event.defaultPrevented || event.timeStamp-start.at>500 ||
+          Math.hypot(event.clientX-start.x,event.clientY-start.y)>8 || start.field!==inputAt(event.target))return;
+      // A touch release carries user activation. Focus before WebKit performs its
+      // automatic reveal. The default click still places the caret at the tapped character.
+      if(document.activeElement!==start.field)start.field.focus({preventScroll:true});
     }
     function onFocus(event:FocusEvent) {
       if(anchor?.field!==event.target)remember(event.target);
-      schedule();
+      geometryChanged();
     }
-    function release() {anchor=undefined}
+    function release() {anchor=undefined;tap=undefined}
     function revealField() {
       frame=0;
       if(!panel)return;
@@ -150,27 +181,37 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
       if(Math.abs(target-panel.scrollTop)>1)panel.scrollTop=target;
     }
     const schedule=()=>{if(!frame)frame=requestAnimationFrame(revealField)};
-    const resize=new ResizeObserver(schedule);
+    const geometryChanged=()=>{placeEditor();settleUntil=performance.now()+750;schedule()};
+    const panelScrolled=()=>{if(anchor && performance.now()<settleUntil)schedule()};
+    const resize=new ResizeObserver(geometryChanged);
     resize.observe(panel);
     panel.addEventListener('pointerdown',beforeFocus,true);
+    panel.addEventListener('pointerup',finishTap,true);
+    panel.addEventListener('pointercancel',release);
+    panel.addEventListener('scroll',panelScrolled,{passive:true});
     panel.addEventListener('focusin',onFocus);
     panel.addEventListener('focusout',schedule);
     panel.addEventListener('touchmove',release,{passive:true});
     panel.addEventListener('wheel',release,{passive:true});
-    const viewport=window.visualViewport;
-    viewport?.addEventListener('resize',schedule);
-    viewport?.addEventListener('scroll',schedule);
+    window.addEventListener('scroll',geometryChanged,{passive:true});
+    viewport?.addEventListener('resize',geometryChanged);
+    viewport?.addEventListener('scroll',geometryChanged);
     remember(document.activeElement);
-    schedule();
+    geometryChanged();
     return ()=>{
       cancelAnimationFrame(frame);resize.disconnect();
       panel.removeEventListener('pointerdown',beforeFocus,true);
+      panel.removeEventListener('pointerup',finishTap,true);
+      panel.removeEventListener('pointercancel',release);
+      panel.removeEventListener('scroll',panelScrolled);
       panel.removeEventListener('focusin',onFocus);
       panel.removeEventListener('focusout',schedule);
       panel.removeEventListener('touchmove',release);
       panel.removeEventListener('wheel',release);
-      viewport?.removeEventListener('resize',schedule);
-      viewport?.removeEventListener('scroll',schedule);
+      window.removeEventListener('scroll',geometryChanged);
+      document.body.style.removeProperty('--editor-page-top');
+      viewport?.removeEventListener('resize',geometryChanged);
+      viewport?.removeEventListener('scroll',geometryChanged);
     };
   },[step]);
 
@@ -236,7 +277,7 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
       setRemoveId(null);
       setPhones(previous => [...previous, {id, value: ''}]);
     });
-    dialog.current?.querySelector<HTMLInputElement>('[data-phone-id="' + id + '"]')?.focus();
+    dialog.current?.querySelector<HTMLInputElement>('[data-phone-id="' + id + '"]')?.focus({preventScroll:true});
   }
   function updatePhone(id:number,value:string) {
     setPhones(previous=>previous.map(row=>row.id===id?{...row,value}:row));

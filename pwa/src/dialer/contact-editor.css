@@ -14,7 +14,7 @@
   border: none;
   color: var(--ink);
   background: var(--editor-page);
-  overflow: hidden;
+  overflow: clip;
   overscroll-behavior: none;
 }
 
@@ -27,10 +27,18 @@
   backdrop-filter: blur(2px);
 }
 
+/* Anchor the editing surface in document coordinates. A viewport-fixed shell can
+   also be moved by iOS while its keyboard animates. */
+body:has(.call-contact-editor) {position: relative; overflow: clip}
+body:has(.call-contact-editor) #root {
+  position: absolute;
+  top: var(--editor-page-top,0px);
+  overflow: clip;
+}
 .call-contact-editor.ios-editor-sheet {
   --sheet-top: max(12px,env(safe-area-inset-top,0px));
-  position: fixed;
-  inset: calc(var(--viewport-top,0px) + var(--sheet-top)) 0 auto;
+  position: absolute;
+  inset: calc(var(--editor-page-top,0px) + var(--sheet-top)) 0 auto;
   height: calc(var(--height,100dvh) - var(--sheet-top));
   max-height: var(--height,100dvh);
   z-index: 70;

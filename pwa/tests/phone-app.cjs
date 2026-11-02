@@ -17,6 +17,7 @@ const server=http.createServer((req,res)=>{
  page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{
    const viewport=Object.assign(new EventTarget(),{height:844,width:390,offsetTop:0,scale:1});
+   Object.defineProperty(viewport,'pageTop',{get:()=>window.scrollY+viewport.offsetTop});
    Object.defineProperty(window,'visualViewport',{get:()=>viewport});
    window.fixtureVV=viewport;
  });
@@ -188,14 +189,66 @@ const server=http.createServer((req,res)=>{
  await sheet.getByRole('button',{name:'编辑',exact:true}).click();
  const shortFrame=await editorFrame();
  const nameField=editor.getByLabel('姓名',{exact:true});
- await nameField.click();
+ // Inspect the real touch focus timing. Dragging over an unfocused field is a
+ // scroll gesture; only a completed tap should request focus without scrolling.
+ await nameField.evaluate(field=>{
+   const original=field.focus;
+   field.focus=function(options){
+     if(options?.preventScroll)this.setAttribute('data-fixture-focus','prevent-scroll');
+     return original.call(this,options);
+   };
+ });
+ const touch=await page.context().newCDPSession(page);
+ const nameBox=await nameField.boundingBox();
+ const finger={x:nameBox.x+nameBox.width/2,y:nameBox.y+nameBox.height/2};
+ await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[finger]});
+ assert.equal(await nameField.evaluate(field=>field===document.activeElement),false,'Touch-down must not steal focus');
+ for(const dy of [12,30,50])await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:finger.x,y:finger.y-dy}]});
+ await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ assert.equal(await nameField.evaluate(field=>field===document.activeElement),false,'A drag across the name field must not open its keyboard');
+ await touch.detach();
+ await nameField.tap();
+ assert.equal(await nameField.getAttribute('data-fixture-focus'),'prevent-scroll','A completed tap should focus in the gesture with preventScroll');
+ assert.ok(await nameField.evaluate(field=>field===document.activeElement),'The native name input must own focus');
+ await nameField.evaluate(field=>{delete field.focus;field.removeAttribute('data-fixture-focus')});
  await viewport(620,12);
  await assertStill(shortFrame,'Opening the name keyboard');
  await keyboardGeometry(492,26,true);
  await assertStill(shortFrame,'Visible name keyboard');
  await keyboardGeometry(492,64,true);
  await assertStill(shortFrame,'Additional Safari pan with unchanged keyboard height');
+ // Mobile compositors can move fixed layers during the keyboard animation
+ // without moving the document by the same amount. Apply the extra translation
+ // to fixed positioning only; a document-anchored editor must stay stationary.
+ const fixedLayer=await page.evaluateHandle(()=>{
+   const shell=document.querySelector('#root');
+   const shifted=getComputedStyle(document.body).position==='fixed'?document.body:
+     getComputedStyle(shell).position==='fixed'?shell:null;
+   if(shifted)shifted.style.translate='0 32px';
+   return shifted;
+ });
+ await assertStill(shortFrame,'Independent native fixed-layer translation');
+ await fixedLayer.evaluate(el=>el?.style.removeProperty('translate'));
+ await fixedLayer.dispose();
+
+ // Here the document itself has also scrolled. A document-coordinate top which
+ // uses offsetTop alone would leave the entire editor too high by scrollY.
+ const allowRootScroll=await page.addStyleTag({content:'html{overflow-y:auto!important} html::after{content:"";position:absolute;top:1100px;left:0;width:1px;height:1px;pointer-events:none}'});
+ await page.evaluate(()=>window.scrollTo(0,32));
+ await page.waitForFunction(()=>window.scrollY===32);
+ await viewport(492,64);
+ await assertStill({...shortFrame,scroll:[shortFrame.scroll[0],32]},'Visual viewport pageTop includes real document scroll');
+ await page.evaluate(()=>window.scrollTo(0,0));
+ await allowRootScroll.evaluate(style=>style.remove());
+ await viewport(492,64);
+ await assertStill(shortFrame,'Visual viewport returns to its original document origin');
  assert.ok(await numberPad.isHidden(),'Name editing uses the iOS keyboard');
+ // A browser focus reveal can scroll the overflow panel after its last viewport
+ // notification. No wheel or touch gesture has asked to move these visible rows.
+ await nameField.evaluate(field=>{
+   field.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+ });
+ await assertStill(shortFrame,'Late native focus reveal with no further viewport change');
  // Users can scroll even a single-number form while the native keyboard is up.
  // A later viewport event must respect that scroll when the caret remains visible.
  const panel=editor.locator('.ios-editor-scroll');

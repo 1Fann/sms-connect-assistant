@@ -62,3 +62,13 @@ Common vCard 2.1/3.0/4.0, Apple grouped phone fields, folding and quoted-printab
 POST /api/v2/contacts/import requires contacts.read and contacts.write, authenticated Phone origin/session, UUID requestId and 1–100 contacts per batch (512 KiB JSON limit). Responses report added/skipped; identical retries return a saved result. A changed body or cross-installation receipt reuse is rejected. Batches commit atomically; pausing/closing does not roll back committed work. Directory schema v3 adds only the contact_imports receipt table, preserving existing records and missed-call viewing receipts. Do not downgrade the database.
 
 Reference: [Apple export instructions](https://support.apple.com/en-ie/guide/iphone/iph075ddebf2/ios).
+
+## dev11 · 导入姓名顺序修复 / Name-order correction
+
+vCard 的 N 字段按「姓；名；其他名；前缀；后缀」分开保存，FN 是导出时的显示字符串（[RFC 6350 §6.2.2](https://www.rfc-editor.org/rfc/rfc6350#section-6.2.2)）。dev11 对姓和名均为汉字、无前后缀且 FN 只由这些姓名组成的个人条目，使用姓在前、无额外空格的形式。保留英文格式、自定义显示名与公司显示名；缺少独立字段时不猜测倒转现有字符串。
+
+已导入用户重新选择同一文件时，会读取全部获授权联系人分页，预览可更正的姓名。只有号码集合及旧版姓名准确匹配、结果唯一、没有系统来源且不存在相同新姓名的另一张卡片，才计划更正；保留原联系人 ID、号码和收藏。用户点击「确认导入并更正姓名」后，用既有 contacts/edit、预览时 revision 和空 targets 提交姓名更新。记录在预览后被改变时由服务端版本校验拒绝；重试复用同一 requestId。匹配不唯一或有关联系统来源的条目不新建副本，提示核对。后来改为不同备注的卡片不会被更名。此修复不进行数据库迁移，不触碰系统通讯录。
+
+The N property separates family and given names, whereas FN is presentation text. dev11 uses family-first names for unambiguous structured Han personal names, retaining custom labels, company names and Latin presentation. It does not reverse arbitrary stored strings.
+
+Reselect the original file to preview name corrections. Only a unique source-free assistant card matching the legacy name and entire phone set is eligible, provided there is no other card with the corrected name. Explicit confirmation performs a name-only edit with the original ID and revision; numbers and favorites are retained, targets stay empty, and retries reuse the request ID. Ambiguous/source-backed matches require manual review. No schema migration or system-address-book write is involved.

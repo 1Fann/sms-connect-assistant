@@ -1,4 +1,4 @@
-export type ImportContact={name:string,numbers:string[]};
+export type ImportContact={name:string,numbers:string[],previousName?:string};
 export type VCardPreview={contacts:ImportContact[],cards:number,skipped:number,duplicates:number};
 const unescapeText=(value:string)=>value.replace(/\\([nN,;\\])/g,(_,c:string)=>c.toLowerCase()==='n'?' ':c);
 function splitValue(value:string,separator:string){
@@ -6,12 +6,24 @@ function splitValue(value:string,separator:string){
  for(const ch of value){if(ch===separator&&!escaped){parts.push(current);current='';continue}current+=ch;if(ch==='\\'&&!escaped)escaped=true;else escaped=false}
  parts.push(current);return parts;
 }
+const cleanName=(name:string)=>name.replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim();
+/** N has family;given;additional;prefix;suffix (RFC 6350 §6.2.2); FN is presentation text. */
+function displayName(fn:string,parts:string[],company:boolean){
+ const old=cleanName(fn||parts.filter(Boolean).join(' '));
+ const [family='',given='',additional='',prefix='',suffix='']=parts.map(cleanName);
+ const han=(value:string)=>/^[\p{Script=Han}·・]+$/u.test(value);
+ // Preserve aliases/company names and Latin formatting. Only reorder clearly structured Han names.
+ if(company||!family||!given||prefix||suffix||![family,given,...(additional?[additional]:[])].every(han))return {name:old};
+ const name=family+given+additional,compact=old.replace(/\s/g,'');
+ if(fn&&compact!==name&&compact!==given+additional+family)return {name:old};
+ return name===old?{name}:{name,previousName:old};
+}
 function property(line:string):{key:string,value:string}|null{
  let quoted=false,index=-1;
  for(let i=0;i<line.length;i++){if(line[i]==='"')quoted=!quoted;else if(line[i]===':'&&!quoted){index=i;break}}
  if(index<0)return null;
  const header=line.slice(0,index),key=header.split(';')[0].split('.').at(-1)!.toUpperCase();
- if(!['FN','N','TEL'].includes(key))return null;
+ if(!['FN','N','TEL','KIND','X-ABSHOWAS'].includes(key))return null;
  let value=line.slice(index+1);
  if(/(?:^|;)ENCODING=QUOTED-PRINTABLE(?:;|$)/i.test(header)){
   const charset=header.match(/(?:^|;)CHARSET="?([^;"]+)/i)?.[1]||'utf-8';
@@ -25,14 +37,14 @@ function property(line:string):{key:string,value:string}|null{
 export function parseVCard(text:string):VCardPreview{
  if(new TextEncoder().encode(text).byteLength>10*1024*1024)throw Error('文件超过 10 MB，请导出时只保留姓名和电话号码');
  const contacts:ImportContact[]=[],known=new Set<string>();let cards=0,skipped=0,duplicates=0;
- let card:{fn:string,n:string,numbers:string[],invalid:boolean}|null=null;
+ let card:{fn:string,n:string[],company:boolean,numbers:string[],invalid:boolean}|null=null;
  const finish=()=>{
   if(!card)return;
-  const name=(card.fn||card.n).replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim();
+  const named=displayName(card.fn,card.n,card.company),name=named.name;
   const numbers=[...new Set(card.numbers.map(n=>n.trim()).filter(n=>n.length>0&&n.length<=96&&!/[\u0000-\u001f\u007f]/.test(n)&&/\d/.test(n)))];
   if(card.invalid||name.length>200||!numbers.length||numbers.length>32){skipped++;card=null;return}
   const key=JSON.stringify([name.normalize('NFC'),[...new Set(numbers.map(n=>n.replace(/[ ()-]/g,'').toLowerCase()))].sort()]);
-  if(known.has(key))duplicates++;else{known.add(key);contacts.push({name,numbers})}
+  if(known.has(key))duplicates++;else{known.add(key);contacts.push({...named,numbers})}
   card=null;
  };
  const physical=text.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n').split('\n'),lines:string[]=[];
@@ -43,13 +55,14 @@ export function parseVCard(text:string):VCardPreview{
   else lines.push(raw);
  }
  for(const line of lines){
-  if(/^BEGIN:VCARD$/i.test(line.trim())){if(card){card.invalid=true;finish()}cards++;if(cards>5000)throw Error('一次最多导入 5000 条联系人');card={fn:'',n:'',numbers:[],invalid:false};continue}
+  if(/^BEGIN:VCARD$/i.test(line.trim())){if(card){card.invalid=true;finish()}cards++;if(cards>5000)throw Error('一次最多导入 5000 条联系人');card={fn:'',n:[],company:false,numbers:[],invalid:false};continue}
   if(/^END:VCARD$/i.test(line.trim())){finish();continue}
   if(!card)continue;
   try{
    const field=property(line);if(!field)continue;
    if(field.key==='FN')card.fn=unescapeText(field.value);
-   else if(field.key==='N')card.n=splitValue(field.value,';').map(unescapeText).filter(Boolean).join(' ');
+   else if(field.key==='N')card.n=splitValue(field.value,';').map(unescapeText);
+   else if(field.key==='KIND'||field.key==='X-ABSHOWAS')card.company ||= /^(org|company)$/i.test(field.value.trim());
    else{
     let phone=unescapeText(field.value);
     if(/^tel:/i.test(phone)){phone=phone.slice(4);try{phone=decodeURIComponent(phone)}catch{card.invalid=true}}

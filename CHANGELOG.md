@@ -1,5 +1,11 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev11 · 中文姓名顺序
+
+- 根据独立姓/名字段修正明确的中文个人姓名，保留英文、公司及自定义备注。
+- 重新选择原文件可预览并更正已导入姓名，保留原联系人身份、号码和收藏，避免创建重复副本。
+- Fix structured Han name ordering and offer explicit, revision-checked correction of legacy assistant-only cards. See [release notes](docs/releases/0.9.0-dev11.md).
+
 ## 0.9.0-dev10 · iPhone 联系人导入
 
 - 互联电话导入 .vcf：本地预览、明确确认、仅保存助手姓名/号码，不写系统通讯录。

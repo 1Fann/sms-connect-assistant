@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.9.1 · 版本整理与短信启动修复
+
+- 版本名统一为 0.9.1，versionCode 升至 53，沿用原包名与签名升级链。
+- 汇总 dev27–dev29：不再闪出配对页或第二次“正在载入”；首次鉴权、短信和会话状态合并返回，SIM 线路映射整页批量读取。
+- 短信内容仍从安卓实时获取，不持久缓存到 iPhone。版本号调整不改变现有证书、配对和权限配置。
+- Rename the release to 0.9.1 (53), retaining package/signing identity and the latest live-startup fixes. See [release notes](docs/releases/0.9.1.md).
+
 ## 0.9.0-dev29 · 启动页面衔接
 
 - 首次实时响应完成后，在同一次界面更新中提交短信、会话状态与已授权状态，避免启动页之后再闪过“正在载入”或错误空列表。

@@ -1,5 +1,11 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev12 · 电话布局与联系人入口
+
+- 下移拨号页线路和设置，固定底部导航/搜索，保留键盘避让。
+- 通话详情新增「新建联系人／添加到现有联系人」，仅保存助手名片，保留幂等、版本与重复号码保护。
+- 用户已确认 iPhone 位置、滚动稳定及新增入口。Lower dialer controls, anchor the dock, and add explicit assistant-only contact actions. See [release notes](docs/releases/0.9.0-dev12.md).
+
 ## 0.9.0-dev11 · 中文姓名顺序
 
 - 根据独立姓/名字段修正明确的中文个人姓名，保留英文、公司及自定义备注。

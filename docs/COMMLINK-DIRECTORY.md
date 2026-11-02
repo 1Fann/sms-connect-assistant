@@ -72,3 +72,9 @@ vCard 的 N 字段按「姓；名；其他名；前缀；后缀」分开保存�
 The N property separates family and given names, whereas FN is presentation text. dev11 uses family-first names for unambiguous structured Han personal names, retaining custom labels, company names and Latin presentation. It does not reverse arbitrary stored strings.
 
 Reselect the original file to preview name corrections. Only a unique source-free assistant card matching the legacy name and entire phone set is eligible, provided there is no other card with the corrected name. Explicit confirmation performs a name-only edit with the original ID and revision; numbers and favorites are retained, targets stay empty, and retries reuse the request ID. Ambiguous/source-backed matches require manual review. No schema migration or system-address-book write is involved.
+
+## dev12 · 从通话详情添加联系人 / Contacts from call details
+
+通话详情可新建联系人或将当前号码添加到现有助手名片。需要安装级联系人读写权限，保存前可取消；不会触发系统来源写回。沿用 contacts/create 和 contacts/edit，均显式 targets:[]，编辑携带 id/revision。追加仅更新号码数组，不提交姓名或收藏。完整号码身份重复检查及 32 个号码上限在 UI 中提示；服务端仍负责最终权限与版本检查。网络重试复用相同 UUID，冲突后需返回联系人列表读取当前版本。
+
+Call details can create an assistant card or append the number to an existing one after explicit confirmation. Both contact capabilities are required. Existing create/edit APIs retain empty targets, idempotent UUIDs and revision checks. Appending submits only numbers, preserving names/favorites; duplicate identities and the 32-number cap are checked. System contacts are unchanged.

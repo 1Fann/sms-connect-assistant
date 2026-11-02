@@ -6,6 +6,7 @@ import {Recent} from './Recent';
 import {PhoneIcon} from './PhoneIcon';
 import {api,request,PhoneError,err,type Session,type Device,type Line} from './client';
 import './phone.css';
+import {useViewport} from '../viewport';
 import {useMissedBadge} from './missedBadge';
 
 async function enablePush(){
@@ -17,7 +18,7 @@ async function enablePush(){
  await api('push/subscribe',{endpoint:sub.endpoint});
 }
 function App(){
- useEffect(()=>{const viewport=window.visualViewport;const update=()=>{const gap=viewport&&Math.abs(viewport.scale-1)<.01?Math.max(0,innerHeight-viewport.height-viewport.offsetTop):0;document.documentElement.style.setProperty('--phone-keyboard',gap>60?gap+'px':'0px')};viewport?.addEventListener('resize',update);viewport?.addEventListener('scroll',update);update();return()=>{viewport?.removeEventListener('resize',update);viewport?.removeEventListener('scroll',update)}},[]);
+ useViewport();
  const [searching,setSearching]=useState(false),[query,setQuery]=useState('');
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
  const [tab,setTab]=useState(()=>location.hash==='#missed'?'最近通话':'拨号键盘'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');
@@ -40,7 +41,7 @@ function App(){
  const can=(p:string)=>session.permissions.includes(p);
  return <><main id="phone-app" className={'phone-app'+(searching?' searching':'')+(tab==='设置'?' settings-page':'')} key={session.installationId}>{message&&<p role="status">{message}</p>}
    <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint} openSettings={()=>switchTab('设置')}/></div>
-   {tab==='最近通话'&&(can('calls.read')?<Recent devices={devices} dial={dial} installation={session.installationId} searching={searching} query={query} settings={()=>switchTab('设置')} contacts={()=>switchTab('个人收藏')} onSeen={missed.viewed}/>:<p>此安装未获通话记录授权</p>)}
+   {tab==='最近通话'&&(can('calls.read')?<Recent canAddContacts={can('contacts.read')&&can('contacts.write')} devices={devices} dial={dial} installation={session.installationId} searching={searching} query={query} settings={()=>switchTab('设置')} contacts={()=>switchTab('个人收藏')} onSeen={missed.viewed}/>:<p>此安装未获通话记录授权</p>)}
    {(tab==='通讯录'||tab==='个人收藏')&&(can('contacts.read')?<Directory key={tab} devices={devices} lines={sorted} canEdit={can('contacts.write')} favorites={tab==='个人收藏'} searchQuery={query} settings={()=>switchTab('设置')} allContacts={()=>switchTab(tab==='个人收藏'?'通讯录':'个人收藏')} dial={dial}/>:<p>此安装未获通讯录读取授权</p>)}
    {tab==='设置'&&<><header className="phone-toolbar"><button className="glass-circle" aria-label="返回通话" onClick={()=>switchTab('最近通话')}><PhoneIcon name="back"/></button><h1>互联设置</h1><span className="toolbar-spacer"/></header><h2>设备与线路</h2>{devices.map(d=><section key={d.deviceId} className="card"><b>{d.name}</b><small>{d.online?'在线':'离线'}</small>{sorted.filter(l=>l.deviceId===d.deviceId).map(l=><div className="row" key={l.lineId}>{l.name}<span>{!l.confirmed?'待确认':l.online?'可用':'离线'}</span><button onClick={()=>{const v=[l.lineId,...sorted.map(x=>x.lineId).filter(id=>id!==l.lineId)];setOrder(v);localStorage.setItem('phone.order',JSON.stringify(v))}}>排在首位</button></div>)}</section>)}
    <p className="hint">网页拨号会打开 Groundwire，通话全程由 Groundwire 承载。</p>

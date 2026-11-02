@@ -4,6 +4,7 @@ import {formatPhone,identity} from '../phone';
 import {PhoneIcon,PhoneAvatar} from './PhoneIcon';
 import {DetailSheet} from './DetailSheet';
 import {callSourceLabel} from './callSource';
+import {CallContactEditor} from './CallContactEditor';
 import {messagesComposeLink} from '../composeLink';
 type Row=CallRecord&{key:string,source:'android'|'pbx'};
 const types:Record<string,string>={incoming:'呼入',outgoing:'呼出',missed:'未接来电',rejected:'已拒接',blocked:'已拦截',other:'通话'};
@@ -35,9 +36,10 @@ function SwipeRow({row,device,editing,chosen,toggle,open,remove,dial,openKey,onO
   </div>
  </div>;
 }
-export function Recent({devices,dial,installation,query,searching,settings,contacts,onSeen}:{devices:Device[],dial:(n:string)=>void,installation:string,query:string,searching:boolean,settings:()=>void,contacts:()=>void,onSeen:(count:number)=>void}){
+export function Recent({canAddContacts,devices,dial,installation,query,searching,settings,contacts,onSeen}:{canAddContacts:boolean,devices:Device[],dial:(n:string)=>void,installation:string,query:string,searching:boolean,settings:()=>void,contacts:()=>void,onSeen:(count:number)=>void}){
  const [mode,setMode]=useState<'all'|'missed'|'removed'>(location.hash==='#missed'?'missed':'all'),[filter,setFilter]=useState(''),[rows,setRows]=useState<CallRecord[]>([]),[pbx,setPbx]=useState<PbxCall[]>([]);
  const [next,setNext]=useState<number|null>(null),[offset,setOffset]=useState(0),[detail,setDetail]=useState<Row|null>(null),[history,setHistory]=useState(false),[error,setError]=useState(''),[reload,refresh]=useState(0);
+ const [contactMode,setContactMode]=useState<'create'|'choose'|null>(null),[contactNotice,setContactNotice]=useState('');
  const [openKey,setOpenKey]=useState<string|null>(null);
  useEffect(()=>{const target=document.getElementById('phone-app'),close=()=>setOpenKey(null);target?.addEventListener('scroll',close,{passive:true});return()=>target?.removeEventListener('scroll',close)},[]);
  const [menu,setMenu]=useState(false),[editing,setEditing]=useState(false),[selected,setSelected]=useState<string[]>([]);
@@ -83,7 +85,7 @@ export function Recent({devices,dial,installation,query,searching,settings,conta
  {mode==='removed'&&<p className="section-note">仅从本设备的助手列表移除，安卓原始通话记录仍保留。</p>}
  {filter&&<p className="source-caption">{label(filter)}</p>}
  {error&&<p role="alert">{error}</p>}
- <div className="call-list">{visible.map(r=><SwipeRow key={r.key} row={r} openKey={openKey} onOpened={setOpenKey} device={sourceLabel(r)} editing={editing} chosen={selected.includes(r.key)} toggle={()=>setSelected(p=>p.includes(r.key)?p.filter(v=>v!==r.key):[...p,r.key])} open={()=>{setHistory(false);setDetail(r)}} remove={()=>remove([r.key])} dial={()=>dial(r.number)}/>)}</div>
+ <div className="call-list">{visible.map(r=><SwipeRow key={r.key} row={r} openKey={openKey} onOpened={setOpenKey} device={sourceLabel(r)} editing={editing} chosen={selected.includes(r.key)} toggle={()=>setSelected(p=>p.includes(r.key)?p.filter(v=>v!==r.key):[...p,r.key])} open={()=>{setHistory(false);setContactNotice('');setDetail(r)}} remove={()=>remove([r.key])} dial={()=>dial(r.number)}/>)}</div>
  {!visible.length&&<div className="phone-empty"><PhoneIcon name={searching?'search':'calls'} size={46}/><h2>{query?'无结果':mode==='removed'?'没有已移除记录':'暂无通话'}</h2><p>{query?'请尝试其他姓名或号码':'共享安卓通话记录后会显示在这里'}</p></div>}
  {next!==null&&<button className="load-more" onClick={()=>setOffset(next)}>载入更多</button>}
  {editing&&selected.length>0&&<div className="selection-bar"><span>已选择 {selected.length} 项</span><button className="danger" onClick={()=>mode==='removed'?(hiddenChange(hidden.filter(id=>!selected.includes(id))),setSelected([]),setEditing(false)):remove(selected)}>{mode==='removed'?'恢复':'从助手移除'}</button></div>}
@@ -91,7 +93,11 @@ export function Recent({devices,dial,installation,query,searching,settings,conta
   <button className="poster-row" onClick={()=>setHistory(!history)}><b>通话记录</b><PhoneIcon name="back" size={16}/></button>
   <div className="poster-card">{(history?same:[detail]).map(r=><div className="history-entry" key={r.key}><div><b>{types[r.type]||r.type}</b><small>{sourceLabel(r)}</small><small>{r.duration?Math.floor(r.duration/60)+' 分 '+r.duration%60+' 秒':r.type==='missed'?'未接听':'未记录时长'}</small></div><time>{new Date(r.date).toLocaleString('zh-CN')}</time></div>)}</div>
   {detail.number&&<button className="poster-card number-card" onClick={()=>{dial(detail.number);setDetail(null)}}><span><small>电话 · {sourceLabel(detail)}</small>{formatPhone(detail.number)}</span><PhoneIcon name="phone" size={20}/></button>}
+  {detail.number&&canAddContacts&&<div className="poster-card contact-add-actions"><button className="poster-row" onClick={()=>setContactMode('create')}>新建联系人<PhoneIcon name="plus" size={18}/></button><button className="poster-row" onClick={()=>setContactMode('choose')}>添加到现有联系人<PhoneIcon name="person" size={18}/></button></div>}
+  {detail.number&&!canAddContacts&&<p className="hint">添加联系人需要此安装的通讯录读写权限。</p>}
+  {contactNotice&&<p role="status">{contactNotice}</p>}
   <button className="poster-row danger" onClick={()=>{if(mode==='removed')hiddenChange(hidden.filter(k=>k!==detail.key));else remove([detail.key]);setDetail(null)}}>{mode==='removed'?'恢复到通话列表':'从助手移除此记录'}</button>
   {history&&<button className="poster-row" onClick={()=>setHistory(false)}>收起通话记录</button>}
- </DetailSheet>}</>;
+ </DetailSheet>}
+ {detail&&contactMode&&<CallContactEditor number={detail.number} mode={contactMode} onClose={()=>setContactMode(null)} onSaved={name=>{setContactMode(null);setDetail(old=>old?{...old,name:name||old.name}:old);setContactNotice('已保存到助手通讯录');setOffset(0);refresh(v=>v+1)}}/>}</>;
 }

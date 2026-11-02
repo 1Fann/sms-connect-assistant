@@ -108,6 +108,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   padding: 0 var(--editor-side) calc(env(safe-area-inset-bottom,0px) + 22px);
@@ -134,7 +135,8 @@ body:has(.ios-editor-edit) {background-color: var(--editor-page)}
 .ios-editor-identity .poster-avatar {
   display: grid;
   place-items: center;
-  width: clamp(108px,43.5vw,174px);
+  /* --height holds the pre-keyboard height throughout keyboard and candidate-bar changes. */
+  width: clamp(64px,min(43.5vw,calc(var(--height,100svh) * .3 - 70px)),174px);
   height: auto;
   aspect-ratio: 1;
   overflow: hidden;
@@ -332,22 +334,6 @@ body:has(.ios-editor-edit) {background-color: var(--editor-page)}
   from {transform: translateY(12px); opacity: .8}
   to {transform: translateY(0); opacity: 1}
 }
-@media (max-height: 680px) {
-  .ios-editor-identity .poster-avatar {width: 126px}
-  .ios-editor-identity {padding: 3px 0 14px; gap: 8px}
-  .ios-editor .ios-editor-origin, .ios-editor label.ios-editor-destination {min-height: 33px}
-}
-@media (max-height: 500px) {
-  .ios-editor-identity .poster-avatar {width: 78px}
-}
-html[data-keyboard-open=true] .ios-editor .ios-editor-identity,
-.ios-editor[data-phone-pad=true] .ios-editor-identity {gap: 5px; padding: 2px 0 12px}
-html[data-keyboard-open=true] .ios-editor .ios-editor-identity .poster-avatar,
-.ios-editor[data-phone-pad=true] .ios-editor-identity .poster-avatar {width: clamp(54px,16vw,76px)}
-html[data-keyboard-open=true] .ios-editor .ios-editor-origin,
-.ios-editor[data-phone-pad=true] .ios-editor-origin,
-html[data-keyboard-open=true] .ios-editor label.ios-editor-destination,
-.ios-editor[data-phone-pad=true] label.ios-editor-destination {min-height: 30px}
 @media (prefers-reduced-motion: reduce) {
   .call-contact-editor.ios-editor {animation: none}
 }

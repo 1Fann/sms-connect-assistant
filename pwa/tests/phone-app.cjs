@@ -1,7 +1,7 @@
 // Exercise built CommLink assets with synthetic records, without registering SIP or calling any phone.
 const http=require('node:http'), fs=require('node:fs'), path=require('node:path'), assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const root=path.resolve(__dirname,'../../app/src/main/assets/iphone');
+const root=path.resolve(process.env.PHONE_UI_TEST_ASSETS||path.join(__dirname,'../../app/src/main/assets/iphone'));
 const server=http.createServer((req,res)=>{
  const p=new URL(req.url,'http://localhost').pathname;
  const file=path.resolve(root,'.'+(p==='/phone/'?'/phone/index.html':p));
@@ -151,15 +151,64 @@ const server=http.createServer((req,res)=>{
  async function setSelection(field,start,end=start){
    await field.evaluate((el,[start,end])=>el.setSelectionRange(start,end),[start,end]);
  }
+ // Bounds are in layout coordinates. Subtract the simulated iOS viewport pan
+ // so a correct compensation is measured as stationary on screen.
+ async function editorFrame(){
+   return editor.evaluate(async form=>{
+     await Promise.all(form.getAnimations().map(animation=>animation.finished));
+     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+     const frame={};
+     for(const [name,element] of Object.entries({
+       page:form,toolbar:form.querySelector('.ios-editor-toolbar'),
+       avatar:form.querySelector('.poster-avatar'),source:form.querySelector('.ios-editor-origin'),
+       name:form.querySelector('[data-editor-name]'),phone:form.querySelector('[data-phone-id]'),
+     })){
+       const rect=element.getBoundingClientRect();
+       frame[name]=[rect.x,rect.y-window.fixtureVV.offsetTop,rect.width,rect.height];
+     }
+     frame.scroll=[form.querySelector('.ios-editor-scroll').scrollTop,window.scrollY];
+     return frame;
+   });
+ }
+ async function assertStill(before,stage){
+   const after=await editorFrame();
+   for(const key of Object.keys(before)){
+     assert.ok(before[key].every((value,index)=>Math.abs(value-after[key][index])<=1),
+       stage+' moved '+key+' from '+JSON.stringify(before[key])+' to '+JSON.stringify(after[key]));
+   }
+ }
  await sheet.getByRole('button',{name:'编辑',exact:true}).click();
- await editor.getByLabel('姓名',{exact:true}).click();
+ const shortFrame=await editorFrame();
+ const nameField=editor.getByLabel('姓名',{exact:true});
+ await nameField.click();
+ await viewport(620,12);
+ await assertStill(shortFrame,'Opening the name keyboard');
  await keyboardGeometry(492,26,true);
+ await assertStill(shortFrame,'Visible name keyboard');
  await keyboardGeometry(492,64,true);
+ await assertStill(shortFrame,'Additional Safari pan with unchanged keyboard height');
  assert.ok(await numberPad.isHidden(),'Name editing uses the iOS keyboard');
+ // Users can scroll even a single-number form while the native keyboard is up.
+ // A later viewport event must respect that scroll when the caret remains visible.
+ const panel=editor.locator('.ios-editor-scroll');
+ await panel.hover();
+ await page.mouse.wheel(0,24);
+ await page.waitForFunction(()=>document.querySelector('.ios-editor-scroll').scrollTop>=23);
+ const shortScrolled=await editorFrame();
+ assert.ok(shortScrolled.scroll[0]>=23,'The short form should have room to scroll above the keyboard');
+ await keyboardGeometry(492,44,false);
+ await assertStill(shortScrolled,'Safari pan after an intentional short-form scroll');
+ await panel.evaluate(element=>{element.scrollTop=0});
+ await nameField.blur();
+ await viewport(620,16);
+ await assertStill(shortFrame,'Dismissing the name keyboard');
+ await viewport(844,0);
+ await assertStill(shortFrame,'Dismissed name keyboard');
  const shortPhone=editor.getByLabel('联系人电话号码',{exact:true});
  await shortPhone.click();
  await viewport(844,0);
  await visibleAbovePad(true);
+ await assertStill(shortFrame,'Web phone keypad with the first number already visible');
  await page.screenshot({path:path.join(screenshots,'contact-edit-short-number-pad.png'),animations:'disabled'});
  const original=await shortPhone.inputValue();
  await setSelection(shortPhone,1,4);
@@ -195,6 +244,15 @@ const server=http.createServer((req,res)=>{
  await sheet.waitFor({state:'hidden'});
  await openCard(longCard.name);
  await sheet.getByRole('button',{name:'编辑',exact:true}).click();
+ await editor.locator('.ios-editor-scroll').evaluate(panel=>{panel.scrollTop=50});
+ const scrolledFrame=await editorFrame();
+ assert.ok(scrolledFrame.scroll[0]>=49,'A long form must be scrolled for this scenario');
+ await nameField.click();
+ await keyboardGeometry(492,24,false);
+ await assertStill(scrolledFrame,'Opening the keyboard on an already visible field in a scrolled form');
+ await nameField.blur();
+ await viewport(844,0);
+ await assertStill(scrolledFrame,'Closing the keyboard in a scrolled form');
  const longPhone=editor.getByLabel('联系人电话号码 12',{exact:true});
  await longPhone.click();
  await visibleAbovePad(false);
@@ -287,6 +345,6 @@ const server=http.createServer((req,res)=>{
  await page.locator('nav button').filter({hasText:'联系人'}).click();await openCard(row.name);
  if(await editButton.count())assert.ok(await editButton.isDisabled(),'Read-only installations cannot open a write editor');
  assert.equal(writes.length,1);assert.deepEqual(errors,[]);
- console.log('PASS contact list index, thumbnails, single/multiple number actions, native detail/edit surfaces, cancelled draft protection, versioned save and read-only capability');
+ console.log('PASS contact list and number actions, stable editor geometry through keyboard opening, panning and dismissal, cancellation, versioned save and read-only capability');
  }finally{await browser.close();server.close()}
 })().catch(e=>{server.close();console.error(e);process.exitCode=1});

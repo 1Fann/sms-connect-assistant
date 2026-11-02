@@ -89,33 +89,60 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     const panel=dialog.current?.querySelector<HTMLElement>('.ios-editor-scroll');
     if(!panel)return;
     let frame=0;
+    let anchor:{field:HTMLInputElement,top:number}|undefined;
+
+    function remember(field:EventTarget|null) {
+      if(field instanceof HTMLInputElement && panel?.contains(field)){
+        anchor={field,top:panel.scrollTop};
+      }
+    }
+    function beforeFocus(event:PointerEvent) {
+      const target=event.target as HTMLElement;
+      remember(target.closest('input') ?? target.closest('label')?.control ?? null);
+    }
+    function onFocus(event:FocusEvent) {
+      if(anchor?.field!==event.target)remember(event.target);
+      schedule();
+    }
+    function release() {anchor=undefined}
     function revealField() {
       frame=0;
-      const field=document.activeElement;
-      if(!panel || !(field instanceof HTMLInputElement) || !panel.contains(field))return;
-      const bounds=panel.getBoundingClientRect();
-      const row=field.getBoundingClientRect();
-      // On iOS a focus change can pan a short form before the keyboard has its final height.
-      // Scroll only this panel, keeping the avatar when both it and the field fit.
-      if(panel.querySelectorAll('[data-phone-id]').length<=2 && row.bottom-bounds.top+panel.scrollTop+8<=bounds.height) {
-        panel.scrollTop=0;
-      } else if(row.bottom>bounds.bottom-8) {
-        panel.scrollTop+=row.bottom-bounds.bottom+8;
-      } else if(row.top<bounds.top+8) {
-        panel.scrollTop+=row.top-bounds.top-8;
+      if(!panel || !anchor || !anchor.field.isConnected)return;
+      const {field,top}=anchor;
+      let target=top;
+      if(field===document.activeElement){
+        const bounds=panel.getBoundingClientRect();
+        const row=field.getBoundingClientRect();
+        const rowTop=row.top-bounds.top+panel.scrollTop;
+        // Keep the pre-focus scroll position unless a keyboard or candidate bar covers the field.
+        target=Math.max(rowTop+row.height+8-bounds.height,Math.min(top,rowTop-8));
+      } else {
+        if(document.documentElement.dataset.keyboardOpen==='true')return;
+        release();
       }
+      target=Math.max(0,Math.min(target,panel.scrollHeight-panel.clientHeight));
+      if(Math.abs(target-panel.scrollTop)>1)panel.scrollTop=target;
     }
     const schedule=()=>{if(!frame)frame=requestAnimationFrame(revealField)};
     const resize=new ResizeObserver(schedule);
     resize.observe(panel);
-    panel.addEventListener('focusin',schedule);
+    panel.addEventListener('pointerdown',beforeFocus,true);
+    panel.addEventListener('focusin',onFocus);
+    panel.addEventListener('focusout',schedule);
+    panel.addEventListener('touchmove',release,{passive:true});
+    panel.addEventListener('wheel',release,{passive:true});
     const viewport=window.visualViewport;
     viewport?.addEventListener('resize',schedule);
     viewport?.addEventListener('scroll',schedule);
+    remember(document.activeElement);
     schedule();
     return ()=>{
       cancelAnimationFrame(frame);resize.disconnect();
-      panel.removeEventListener('focusin',schedule);
+      panel.removeEventListener('pointerdown',beforeFocus,true);
+      panel.removeEventListener('focusin',onFocus);
+      panel.removeEventListener('focusout',schedule);
+      panel.removeEventListener('touchmove',release);
+      panel.removeEventListener('wheel',release);
       viewport?.removeEventListener('resize',schedule);
       viewport?.removeEventListener('scroll',schedule);
     };

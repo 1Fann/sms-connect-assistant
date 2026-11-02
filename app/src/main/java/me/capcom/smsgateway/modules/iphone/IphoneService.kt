@@ -69,6 +69,7 @@ class IphoneService : Service() {
         // without changing service preferences, copying credentials, or opening UI.
         if (intent?.action == ACTION_REFRESH_ROOT) RootBridge.refreshIfAuthorized(this, discoverExisting=true)
         if (getSharedPreferences("peer-client",0).getBoolean("enabled",false)) {
+            directory.monitor.start()
             if(peerJob?.isActive!=true) peerJob=scope.launch {
                 peerRunning=true
                 try {
@@ -85,6 +86,7 @@ class IphoneService : Service() {
             return START_STICKY
         }
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
+        directory.monitor.start()
         if (starting.compareAndSet(false,true)) scope.launch {
             try {
                 messages.start(this@IphoneService)
@@ -93,7 +95,7 @@ class IphoneService : Service() {
                 directoryJob=scope.launch {
                     while(isActive) {
                         runCatching { directory.tickLocal("server") }
-                        delay(10_000)
+                        directory.monitor.awaitWork(10_000)
                     }
                 }
                 status= "HTTPS 已监听 [::]:8443；公网连通性未验证"
@@ -352,7 +354,7 @@ class IphoneService : Service() {
         }
         return result
     }
-    override fun onDestroy() { scope.cancel(); synchronized(serverLock) { phoneServer.stop(); server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
+    override fun onDestroy() { scope.cancel(); directory.monitor.stop(); synchronized(serverLock) { phoneServer.stop(); server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
     companion object {
         @Volatile var peerRunning=false
         const val ACTION_RECOVER = "me.capcom.smsgateway.iphone.RECOVER"

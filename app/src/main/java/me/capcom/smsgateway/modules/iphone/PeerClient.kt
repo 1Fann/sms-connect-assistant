@@ -76,6 +76,7 @@ class PeerClient(private val ctx: Context) {
         // Migrated clients keep peer:<uuid> and their original receipt table.
         // A different master cannot inspect old jobs or acknowledge old receipts.
         val prefix=if(queueScope.isEmpty())"peer:" else "peer:"+queueScope+":"
+        val monitor=me.capcom.smsgateway.modules.directory.DirectoryService.get(ctx).monitor
         val journal=PeerHub.get(ctx)
         while(currentCoroutineContext().isActive && prefs.getBoolean("enabled",false)){
             lastProgress=android.os.SystemClock.elapsedRealtime()
@@ -126,7 +127,11 @@ class PeerClient(private val ctx: Context) {
                 }
                 failures=0;status="已连接服务器手机 · 本机共享 "+sims.length()+" 条线路"
             }catch(e:Exception){if(e is kotlinx.coroutines.CancellationException)throw e;failures=(failures+1).coerceAtMost(4);status="等待连接 · "+e.javaClass.simpleName}
-            delay(if(catchingUp && failures==0)100 else 2000L*(1 shl failures))
+            when {
+                failures>0 -> delay(2000L*(1 shl failures))
+                catchingUp -> delay(100)
+                else -> monitor.awaitWork(2000)
+            }
         }
     }
     companion object { @Volatile var status="等待连接";@Volatile var lastProgress=0L }

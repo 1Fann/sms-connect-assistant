@@ -46,7 +46,7 @@ const server=http.createServer((req,res)=>{
   const data={session:{installationId:'test',permissions:['contacts.read','calls.read',...(canWrite?['contacts.write']:[])]},
    devices:[{deviceId:'server',name:'主机',online:true,contactsWrite:true}],lines:[],
    'call-history/missed':{count:0},'voice/history':[],
-   contacts:{items:contacts.filter(c=>c.name.includes(q)),next:null},'contact-sync/jobs':{items:[{id:'create-job',state:'done',detail:''},{id:'edit-job',state:'done',detail:''}]},
+   'contacts/version':{version:'fixture'},contacts:{items:contacts.filter(c=>c.name.includes(q)),next:null,version:'fixture'},'contact-sync/jobs':{items:[{id:'create-job',state:'done',detail:''},{id:'edit-job',state:'done',detail:''}]},
    'call-history':{items:[record],next:null}};
   assert.equal(req.method(),'GET','Unexpected mutation '+endpoint);
   assert.ok(endpoint in data,'Unexpected route '+endpoint);

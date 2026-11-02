@@ -4,24 +4,24 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-class DirectoryService internal constructor(private val ctx: Context, internal val database:DirectoryDb=DirectoryDb(ctx)) {
+class DirectoryService internal constructor(private val ctx: Context, internal val database:DirectoryDb=DirectoryDb(ctx),
+    localProvider:DirectoryProvider=DirectoryProvider(ctx.applicationContext)) {
     private val db get()=database.writableDatabase
     private val region get()=ctx.getSharedPreferences("iphone",0).getString("region","CN")?:"CN"
-    private val local by lazy { PeerDirectoryAgent(ctx,PeerDirectoryAgent.LOCAL_LINK) }
-    private var lastLocal=0L
+    private val local by lazy { PeerDirectoryAgent(ctx,PeerDirectoryAgent.LOCAL_LINK,this,localProvider) }
+    internal val monitor by lazy { DirectoryMonitor(ctx.applicationContext) }
 
     @Synchronized fun tickLocal(deviceId:String="server") {
         require(deviceId=="server")
-        val now=android.os.SystemClock.elapsedRealtime()
-        if(lastLocal!=0L&&now-lastLocal<1500L)return
-        lastLocal=now
-        local.accept(sync(deviceId,local.prepare()))
+        val packet=local.prepare()
+        local.accept(sync(deviceId,packet))
         flushMissedAlerts()
     }
 
     fun revoke(device:String) {
         db.atomic {
             db.execSQL("DELETE FROM grants WHERE device=?",arrayOf(device))
+            db.execSQL("DELETE FROM directory_versions WHERE device=?",arrayOf(device))
             db.execSQL("UPDATE jobs SET state='revoked',detail='设备配对已撤销',finished=? WHERE device=? AND state='queued'",
                 arrayOf(System.currentTimeMillis(),device))
             // A reused legacy role must not inherit the old phone's sources, jobs or sequence.
@@ -48,6 +48,7 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
         require(events.length()<=32 && results.length()<=32)
         // Associate newly-created Provider IDs before accepting their first snapshot.
         for(r in results.objects()) acceptResult(device,r,accepted)
+        var contactsChanged=false
         for(e in events.objects()){
             val kind=e.getString("kind")
             val raw=e.getString("raw")
@@ -58,7 +59,7 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
             if(seq>previous){
                 val record=e.optJSONObject("record")
                 if(record!=null)require(record.getString("rawId")==raw)
-                if(kind=="contact")ingestContact(device,raw,record)
+                if(kind=="contact"){ingestContact(device,raw,record);contactsChanged=true}
                 else if(record==null)db.execSQL("DELETE FROM calls WHERE device=? AND raw=?",arrayOf(device,raw))
                 else {
                     val now=System.currentTimeMillis()
@@ -71,12 +72,33 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
             }
             acks.put(JSONObject().put("kind",kind).put("raw",raw).put("seq",seq))
         }
+        if(contactsChanged)markAndroidContactsChanged(device)
         val response=JSONObject().put("ack",acks).put("accepted",accepted)
-        if(writes)db.rows("SELECT id,raw,expected,action,payload FROM jobs WHERE device=? AND state='queued' ORDER BY created,rowid LIMIT 1",device){ c ->
-            JSONObject().put("id",c.getString(0)).put("rawId",c.getString(1)).put("expected",c.getString(2))
-                .put("action",c.getString(3)).put("payload",JSONObject(c.getString(4)))
-        }.firstOrNull()?.let{response.put("job",it)}
+        if(writes)nextWrite(device)?.let{response.put("job",it)}
         response
+    }
+
+    private fun nextWrite(device:String):JSONObject? = db.rows(
+        "SELECT id,raw,expected,action,payload FROM jobs WHERE device=? AND state='queued' ORDER BY created,rowid LIMIT 1",device
+    ){ c -> JSONObject().put("id",c.getString(0)).put("rawId",c.getString(1)).put("expected",c.getString(2))
+        .put("action",c.getString(3)).put("payload",JSONObject(c.getString(4)))
+    }.firstOrNull()
+
+    internal fun localWriteActive(id:String)=db.scalar("""SELECT 1 FROM jobs j JOIN grants g ON g.device=j.device
+        WHERE j.device='server' AND j.id=? AND j.state='queued' AND g.contacts=1 AND g.writing=1""",id)!=null
+
+    internal fun acceptLocalReceipt(receipt:JSONObject) {
+        db.atomic {
+            val accepted=JSONArray()
+            acceptResult("server",receipt,accepted)
+            if(accepted.length()!=0)db.execSQL("UPDATE applied SET acked=1 WHERE link=? AND id=?",
+                arrayOf(PeerDirectoryAgent.LOCAL_LINK,receipt.getString("id")))
+        }
+        dispatchLocalWrite()
+    }
+
+    private fun dispatchLocalWrite() {
+        nextWrite("server")?.let(local::offerWrite)
     }
 
     private fun flushMissedAlerts(){
@@ -100,7 +122,7 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
             val raw=result.optString("rawId",job[2])
             if(state=="done"){
                 require(raw.toLong()>0 && (job[1]=="create" || raw==job[2]))
-                if(job[1]=="delete")ingestContact(device,raw,null)
+                if(job[1]=="delete"){ingestContact(device,raw,null);markAndroidContactsChanged(device)}
                 if(job[1]=="create"){
                     // Snapshot may have arrived before the receipt, or vice versa.
                     db.execSQL("UPDATE sources SET contact=? WHERE device=? AND raw=?",arrayOf(job[0],device,raw))
@@ -166,9 +188,29 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
         if(allowed("server")&&deviceAccess("server").optBoolean("contactsRead"))
             ctx.getSharedPreferences("directory-sync",0).getString("contact-error",null) else null
     internal fun regionCode()=region
+    internal fun markAndroidContactsChanged(device:String) {
+        db.execSQL("INSERT OR REPLACE INTO directory_versions VALUES(?,?)",arrayOf(device,newId()))
+    }
+    internal fun androidContactsVersion(allowed:(String)->Boolean):String {
+        val visible=JSONArray()
+        db.rows("""SELECT g.device,g.writing,v.version FROM grants g LEFT JOIN directory_versions v
+            ON v.device=g.device WHERE g.contacts=1 ORDER BY g.device"""){
+            Triple(it.getString(0),it.getInt(1),it.getString(2).orEmpty())
+        }.forEach { (device,writing,version)->
+            if(allowed(device))visible.put(JSONArray().put(device).put(writing).put(version))
+        }
+        visible.put(contactReadError(allowed).orEmpty())
+        return me.capcom.smsgateway.modules.iphone.PrivateStore.hash(visible.toString())
+    }
     fun androidContacts(query:String,offset:Int,allowed:(String)->Boolean,favorite:Boolean=false)=AndroidDirectory(this).list(query,offset,allowed,favorite)
     fun androidContact(id:String,allowed:(String)->Boolean)=AndroidDirectory(this).view(id,allowed)
-    fun androidMutate(owner:String,action:String,body:JSONObject,allowed:(String)->Boolean)=AndroidDirectory(this).mutate(owner,action,body,allowed)
+    fun androidMutate(owner:String,action:String,body:JSONObject,allowed:(String)->Boolean)=AndroidDirectory(this).mutate(owner,action,body,allowed).also { result ->
+        if(result.optString("deviceId")=="server" && result.optString("state")=="queued"){
+            // The durable mutation committed before this offer. The regular sync loop
+            // still replays a pending job after a crash or a transient provider failure.
+            dispatchLocalWrite()
+        }
+    }
 
     private fun visibleSources(id:String,allowed:(String)->Boolean,deleted:Boolean):List<JSONObject> =
         db.rows("""SELECT s.device,s.payload,s.deleted FROM sources s JOIN grants g ON s.device=g.device
@@ -259,9 +301,10 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
     private fun page(rows:List<JSONObject>,offset:Int,size:Int)=JSONObject().put("items",JSONArray(rows.take(size)))
         .put("next",if(rows.size>size)offset+size else JSONObject.NULL)
 
-    fun jobs(id:String?,allowed:(String)->Boolean):JSONObject {
-        val where=if(id==null)"" else " WHERE contact=?"
-        val args=if(id==null)emptyArray() else arrayOf(id)
+    fun jobs(id:String?,allowed:(String)->Boolean,jobId:String?=null):JSONObject {
+        require(jobId==null || id!=null && validId(jobId))
+        val where=when { jobId!=null -> " WHERE id=? AND contact=?"; id!=null -> " WHERE contact=?"; else -> "" }
+        val args=listOfNotNull(jobId,id).toTypedArray()
         val items=JSONArray()
         db.rawQuery("SELECT id,contact,device,raw,action,state,detail,created FROM jobs"+where+" ORDER BY created DESC,rowid DESC",args).use { c->
             while(items.length()<100 && c.moveToNext())if(allowed(c.getString(2)))

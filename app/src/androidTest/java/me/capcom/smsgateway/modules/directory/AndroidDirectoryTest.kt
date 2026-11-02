@@ -48,6 +48,26 @@ class AndroidDirectoryTest {
   assertEquals("Second phone",s.resolveName(phone){it=="B"})
   assertEquals(a.getString("id"),cards{it=="A"}.first{it.getString("nativeContactId")=="5"}.getString("id"))
  }
+ @Test fun nativeNumbersKeepAndroidOrderAcrossAccountsAndLegacySnapshots(){
+  val first=listOf("5550188","5550101","5550166")
+  val second=listOf("5550177","5550188","5550102")
+  fun source(raw:String,numbers:List<String>,seq:Int,defaults:Int?)=event(raw=raw,seq=seq).apply{
+   getJSONObject("record").apply{
+    put("numbers",JSONArray(numbers))
+    if(defaults!=null)put("superPrimaryCount",defaults)
+   }
+  }
+  s.sync("A",packet(listOf(source("10",second,1,null),source("2",first,2,null))))
+  val legacy=cards().single()
+  assertEquals(listOf("5550188","5550101","5550166","5550177","5550102"),legacy.getJSONArray("numbers").strings())
+  s.sync("A",packet(listOf(source("2",first,3,1),source("10",second,4,1))))
+  val current=cards().single()
+  assertEquals(legacy.getString("id"),current.getString("id"))
+  assertEquals(listOf("5550177","5550188","5550101","5550166","5550102"),current.getJSONArray("numbers").strings())
+  val sources=current.getJSONArray("sources").objects().associateBy{it.getString("rawId")}
+  assertEquals(first,sources.getValue("2").getJSONArray("numbers").strings())
+  assertEquals(second,sources.getValue("10").getJSONArray("numbers").strings())
+ }
  @Test fun aggregatedThumbnailIsScopedAndReturnedOnce(){
   val photo="iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
   val photographed=event(raw="2").apply{getJSONObject("record").put("photo",photo)}
@@ -89,6 +109,10 @@ class AndroidDirectoryTest {
   s.sync("A",packet());s.sync("B",packet(write=false))
   val b=JSONObject().put("destination","android").put("requestId",newId()).put("deviceId","A").put("name","New").put("numbers",JSONArray().put(phone))
   val result=mutate("create",b)
+  val job=result.getString("jobId");val contact=result.getString("id")
+  assertEquals(1,s.jobs(contact,all,job).getJSONArray("items").length())
+  assertEquals(0,s.jobs(newId(),all,job).getJSONArray("items").length())
+  assertEquals(0,s.jobs(contact,{false},job).getJSONArray("items").length())
   assertTrue(cards().isEmpty());assertEquals("A",result.getString("deviceId"));assertTrue(mutate("create",b).getBoolean("replayed"))
   assertEquals(1,count("jobs"));assertTrue(s.sync("A",packet()).has("job"));assertFalse(s.sync("B",packet(write=false)).has("job"))
   assertTrue(runCatching{mutate("create",JSONObject(b.toString()).put("requestId",newId()).put("deviceId","B"))}.isFailure)

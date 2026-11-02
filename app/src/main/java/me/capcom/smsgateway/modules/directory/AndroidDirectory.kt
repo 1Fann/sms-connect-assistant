@@ -12,7 +12,7 @@ internal class AndroidDirectory(private val service:DirectoryService) {
  fun cards(allowed:(String)->Boolean):List<JSONObject>{
   val groups=linkedMapOf<Pair<String,String>,MutableList<JSONObject>>()
   val thumbnails = mutableMapOf<Pair<String,String>,String>()
-  db.rows("SELECT s.device,s.raw,s.payload FROM sources s JOIN grants g ON g.device=s.device WHERE s.deleted=0 AND g.contacts=1 ORDER BY s.device,s.raw"){
+  db.rows("SELECT s.device,s.raw,s.payload FROM sources s JOIN grants g ON g.device=s.device WHERE s.deleted=0 AND g.contacts=1 ORDER BY s.device,CAST(s.raw AS INTEGER),s.raw"){
    Triple(it.getString(0),it.getString(1),it.getString(2))
   }.forEach { (device,raw,json)->
    if(!allowed(device))return@forEach
@@ -24,7 +24,7 @@ internal class AndroidDirectory(private val service:DirectoryService) {
    val aggregate=payload.optString("contactId").takeIf{it.toLongOrNull()?.let{v->v>0}==true}?:raw
    groups.getOrPut(device to aggregate){arrayListOf()}.add(JSONObject().put("deviceId",device).put("rawId",raw)
     .put("contactId",aggregate).put("revision",payload.getString("revision")).put("name",payload.optString("name"))
-    .put("numbers",payload.getJSONArray("numbers")).put("readOnly",payload.optBoolean("readOnly"))
+    .put("numbers",payload.getJSONArray("numbers")).putOpt("superPrimaryCount",payload.opt("superPrimaryCount")).put("readOnly",payload.optBoolean("readOnly"))
     .put("displayName",payload.optString("displayName",payload.optString("name"))).put("nameRawId",payload.optString("nameRawId"))
     .put("observedAt",payload.optLong("observedAt")))
   }
@@ -38,10 +38,22 @@ internal class AndroidDirectory(private val service:DirectoryService) {
    val thumbnail = thumbnails[identity.first to primary.getString("rawId")]
     ?: sources.firstNotNullOfOrNull { thumbnails[identity.first to it.getString("rawId")] }
    JSONObject().put("photo",thumbnail).put("id",cardId).put("deviceId",identity.first).put("nativeContactId",identity.second)
-    .put("name",newest.getString("displayName")).put("numbers",JSONArray(sources.flatMap{it.getJSONArray("numbers").strings()}.distinct()))
+    .put("name",newest.getString("displayName")).put("numbers",displayNumbers(sources))
     .put("sources",JSONArray(sources)).put("primaryRawId",primary.getString("rawId"))
     .put("revision",PrivateStore.hash(snapshot).take(12).toLong(16)).put("favorite",cardId in favorites).put("conflict",false)
   }
+ }
+ private fun displayNumbers(sources:List<JSONObject>):JSONArray {
+  val groups=sources.map { source ->
+   val numbers=source.getJSONArray("numbers").strings()
+   val count=source.optInt("superPrimaryCount",0).coerceIn(0,numbers.size)
+   numbers.take(count) to numbers.drop(count)
+  }
+  // Native details prepends a default even when it belongs to a later raw account.
+  val ordered=linkedSetOf<String>()
+  for((preferred,_) in groups.asReversed())ordered.addAll(preferred)
+  for((_,ordinary) in groups)ordered.addAll(ordinary)
+  return JSONArray(ordered.toList())
  }
  fun view(id:String,allowed:(String)->Boolean)=cards(allowed).firstOrNull{it.getString("id")==id}
  fun list(query:String,offset:Int,allowed:(String)->Boolean,favorite:Boolean=false):JSONObject {
@@ -85,6 +97,7 @@ internal class AndroidDirectory(private val service:DirectoryService) {
   if(action=="favorite"){
    db.execSQL("INSERT OR IGNORE INTO contacts(id) VALUES(?)",arrayOf(contact))
    db.execSQL("UPDATE contacts SET favorite=? WHERE id=?",arrayOf(if(body.getBoolean("favorite"))1 else 0,contact))
+   service.markAndroidContactsChanged(device)
   }else{
    if(!service.deviceAccess(device).optBoolean("contactsWrite"))throw SecurityException()
    if(body.getString("deviceId")!=device)throw SecurityException()

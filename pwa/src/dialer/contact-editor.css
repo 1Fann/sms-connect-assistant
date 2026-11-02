@@ -1,6 +1,6 @@
 /* Both surfaces share the phone viewport geometry. Only the field list scrolls. */
+:root {--editor-page: #ededf5}
 .call-contact-editor.ios-editor {
-  --editor-page: #ededf5;
   --editor-fill: #fff;
   --editor-pill: #dedee7;
   --editor-muted: #74747e;
@@ -11,6 +11,8 @@
   margin-inline: auto;
   width: min(100%,600px);
   padding: 0;
+  /* Keep painting below the native keyboard. Only the flex content area shrinks. */
+  padding-bottom: var(--phone-keyboard,0px);
   border: none;
   color: var(--ink);
   background: var(--editor-page);
@@ -31,7 +33,7 @@
   --sheet-top: max(12px,env(safe-area-inset-top,0px));
   position: fixed;
   inset: calc(var(--viewport-top,0px) + var(--sheet-top)) 0 auto;
-  height: calc(var(--height,100dvh) - var(--sheet-top) - var(--phone-keyboard,0px));
+  height: calc(var(--height,100dvh) - var(--sheet-top));
   max-height: var(--height,100dvh);
   z-index: 70;
   border-radius: 30px 30px 0 0;
@@ -43,7 +45,7 @@
   position: absolute;
   inset: 0 0 auto;
   z-index: 40;
-  height: calc(100% - var(--phone-keyboard,0px));
+  height: 100%;
   padding-top: env(safe-area-inset-top,0px);
   animation: ios-editor-page-in .22s ease-out;
 }
@@ -113,8 +115,13 @@
 }
 .ios-editor-scroll::-webkit-scrollbar {display: none}
 .ios-editor-edit .ios-editor-scroll {padding-bottom: calc(env(safe-area-inset-bottom,0px) + 92px)}
-html[data-keyboard-open=true] .ios-editor-edit .ios-editor-scroll {padding-bottom: 16px}
-html[data-keyboard-open=true] #root:has(> .ios-editor-edit) .phone-dock {visibility: hidden}
+html[data-keyboard-open=true] .ios-editor .ios-editor-scroll,
+.ios-editor[data-phone-pad=true] .ios-editor-scroll {padding-bottom: 12px}
+html[data-keyboard-open=true] #root:has(> .ios-editor-edit) .phone-dock,
+#root:has(> .ios-editor-edit[data-phone-pad=true]) .phone-dock,
+#root:has(> .ios-editor-edit) .directory-poster[inert] {visibility: hidden}
+html:has(.ios-editor-edit),
+body:has(.ios-editor-edit) {background-color: var(--editor-page)}
 
 .ios-editor-identity {
   display: flex;
@@ -333,11 +340,20 @@ html[data-keyboard-open=true] #root:has(> .ios-editor-edit) .phone-dock {visibil
 @media (max-height: 500px) {
   .ios-editor-identity .poster-avatar {width: 78px}
 }
+html[data-keyboard-open=true] .ios-editor .ios-editor-identity,
+.ios-editor[data-phone-pad=true] .ios-editor-identity {gap: 5px; padding: 2px 0 12px}
+html[data-keyboard-open=true] .ios-editor .ios-editor-identity .poster-avatar,
+.ios-editor[data-phone-pad=true] .ios-editor-identity .poster-avatar {width: clamp(54px,16vw,76px)}
+html[data-keyboard-open=true] .ios-editor .ios-editor-origin,
+.ios-editor[data-phone-pad=true] .ios-editor-origin,
+html[data-keyboard-open=true] .ios-editor label.ios-editor-destination,
+.ios-editor[data-phone-pad=true] label.ios-editor-destination {min-height: 30px}
 @media (prefers-reduced-motion: reduce) {
   .call-contact-editor.ios-editor {animation: none}
 }
 @media (prefers-color-scheme: dark) {
-  .call-contact-editor.ios-editor {--editor-page: #17171d; --editor-fill: #28282f; --editor-pill: #35353d; --editor-muted: #acacb4; --editor-rule: rgb(255 255 255 / 15%)}
+  :root {--editor-page: #17171d}
+  .call-contact-editor.ios-editor {--editor-fill: #28282f; --editor-pill: #35353d; --editor-muted: #acacb4; --editor-rule: rgb(255 255 255 / 15%)}
   .ios-editor button.ios-editor-circle {box-shadow: inset 0 1px 1px rgb(255 255 255 / 13%)}
   .ios-editor .ios-phone-row input {color: #62b8ff}
 }

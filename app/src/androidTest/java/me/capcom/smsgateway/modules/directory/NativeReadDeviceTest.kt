@@ -21,10 +21,19 @@ class NativeReadDeviceTest {
    prefs.edit().putBoolean("contacts.read",true).commit()
    val provider=DirectoryProvider(ctx)
    assertTrue("Read permission required",provider.allowed("contacts.read"))
-   var count=0
-   provider.scanContacts(emptyMap()){_,_,record->if(record!=null)count++}
-   assertTrue("Expected existing Android contacts",count>0)
-   instrumentation.sendStatus(0,android.os.Bundle().apply{putInt("contactSourcesRead",count);putString("probe","read-only; no content logged")})
+   val stamps=mutableMapOf<String,String>()
+   val started=android.os.SystemClock.elapsedRealtime()
+   provider.scanContacts(emptyMap()){raw,stamp,record->if(record!=null)stamps[raw]=stamp}
+   val first=android.os.SystemClock.elapsedRealtime()
+   assertTrue("Expected existing Android contacts",stamps.isNotEmpty())
+   var unchanged=0
+   provider.scanContacts(stamps){_,_,record->if(record==null)unchanged++}
+   val end=android.os.SystemClock.elapsedRealtime()
+   assertTrue("Contacts changed during read-only measurement",unchanged==stamps.size)
+   instrumentation.sendStatus(0,android.os.Bundle().apply{
+    putInt("contactSourcesRead",stamps.size);putLong("initialReadMs",first-started)
+    putLong("unchangedReadMs",end-first);putString("probe","read-only; no content logged")
+   })
   }finally{prefs.edit().putBoolean("contacts.read",previous).commit()}
  }
 }

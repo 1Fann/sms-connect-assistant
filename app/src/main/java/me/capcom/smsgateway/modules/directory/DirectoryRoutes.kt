@@ -33,8 +33,16 @@ fun Route.directoryRoutes(directory:DirectoryService,
             return@get
         }
         call.directoryAnswer {
-            directory.androidContacts(call.request.queryParameters["q"].orEmpty().take(160),offset(call),devices(call),call.request.queryParameters["favorite"]=="true")
+            val allowed=devices(call)
+            // Capture before reading the cards so a concurrent commit is detected on the next check.
+            val version=directory.androidContactsVersion(allowed)
+            directory.androidContacts(call.request.queryParameters["q"].orEmpty().take(160),offset(call),allowed,call.request.queryParameters["favorite"]=="true")
+                .put("version",version)
         }
+    }
+    get("contacts/version"){
+        if(!requireScope(call,"contacts.read"))return@get
+        call.directoryAnswer { JSONObject().put("version",directory.androidContactsVersion(devices(call))) }
     }
     get("contacts/{id}"){
         if(!requireScope(call,"contacts.read"))return@get
@@ -53,7 +61,7 @@ fun Route.directoryRoutes(directory:DirectoryService,
     }
     get("contact-sync/jobs"){
         if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@get
-        call.directoryAnswer { directory.jobs(call.request.queryParameters["contactId"],devices(call)) }
+        call.directoryAnswer { directory.jobs(call.request.queryParameters["contactId"],devices(call),call.request.queryParameters["jobId"]) }
     }
     get("call-history"){
         if(!requireScope(call,"calls.read"))return@get

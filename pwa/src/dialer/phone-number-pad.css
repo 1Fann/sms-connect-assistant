@@ -1,0 +1,72 @@
+.phone-number-pad {
+  --pad-bg: #d1d3da;
+  --pad-key: #fff;
+  --pad-ink: #111114;
+  --pad-pressed: #b0b4bf;
+  --pad-row: clamp(44px, 6.45dvh, 56px);
+  --pad-gap: 6px;
+  position: relative;
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: var(--pad-row);
+  gap: var(--pad-gap);
+  padding: 7px max(5px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(5px, env(safe-area-inset-left));
+  background: var(--pad-bg);
+  color: var(--pad-ink);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.phone-number-pad button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--pad-key);
+  color: inherit;
+  font-family: inherit;
+  box-shadow: 0 1px 0 rgb(32 34 46 / 29%);
+  touch-action: manipulation;
+}
+.phone-number-pad-digit {font-size: 27px; font-weight: 400; line-height: 1}
+.phone-number-pad-letters {min-height: 10px; margin-top: 1px; font-size: 9px; font-weight: 650; line-height: 10px; letter-spacing: .14em}
+.phone-number-pad .phone-number-pad-action {background: transparent; box-shadow: none; font-size: 19px; font-weight: 500}
+.phone-number-pad button:active {background: var(--pad-pressed); filter: none}
+.phone-number-pad button:focus-visible {outline: 2px solid var(--accent, #007aff); outline-offset: -3px}
+.phone-number-pad-actions {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr))}
+
+.phone-number-pad-switch {position: relative}
+.phone-number-pad-symbols {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 0;
+  bottom: calc(100% + var(--pad-gap));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: clamp(144px, 43vw, 185px);
+  height: calc(var(--pad-row) + 4px);
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--pad-bg);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 24%);
+}
+.phone-number-pad-symbols button {font-size: 26px; line-height: 1}
+
+@media (max-height: 500px) {
+  .phone-number-pad {--pad-row: clamp(33px, 10dvh, 44px); --pad-gap: 3px; padding-top: 4px}
+  .phone-number-pad-digit {font-size: 22px}
+  .phone-number-pad-letters {min-height: 8px; margin-top: 0; font-size: 8px; line-height: 8px}
+}
+@media (prefers-color-scheme: dark) {
+  .phone-number-pad {--pad-bg: #2c2d32; --pad-key: #55565c; --pad-ink: #fff; --pad-pressed: #777980}
+}

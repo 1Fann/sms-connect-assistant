@@ -49,9 +49,9 @@ class MissedCallsTest {
  @Test fun directoryV1MigrationOnlyAddsViewReceiptsAndPreservesRecords(){
   add("A")
   val db=service.database.writableDatabase
-  db.execSQL("DROP TABLE call_seen");db.execSQL("DROP TABLE contact_imports");db.version=1;service.database.close()
+  db.execSQL("DROP TABLE call_seen");db.execSQL("DROP TABLE contact_imports");db.execSQL("DROP TABLE directory_versions");db.version=1;service.database.close()
   service=DirectoryService(ctx,DirectoryDb(ctx,file))
-  assertEquals(1,count());assertEquals(3,service.database.readableDatabase.version)
+  assertEquals(1,count());assertEquals(4,service.database.readableDatabase.version)
   assertEquals(1,service.history(null,0,{true},false).getJSONArray("items").length())
  }
 }

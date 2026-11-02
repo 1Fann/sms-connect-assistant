@@ -3,7 +3,10 @@ package me.capcom.smsgateway.modules.directory
 import android.Manifest
 import android.content.ContentProviderOperation as Op
 import android.content.ContentProviderResult
+import android.content.ContentUris
 import android.database.Cursor
+import android.database.sqlite.SQLiteBlobTooBigException
+import android.database.sqlite.SQLiteException
 import android.content.ContentResolver
 import android.content.Context
 import android.content.OperationApplicationException
@@ -15,6 +18,7 @@ import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.ContactsContract.CommonDataKinds.Photo
 import android.provider.ContactsContract.CommonDataKinds.StructuredName
+import android.provider.ContactsContract.Contacts
 import android.provider.ContactsContract.Data
 import android.provider.ContactsContract.RawContacts
 import android.telecom.PhoneAccountHandle
@@ -27,11 +31,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal interface DirectoryContent {
-    fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?):Cursor?
+    fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?,sortOrder:String?=null):Cursor?
     fun applyBatch(authority:String,ops:ArrayList<Op>):Array<ContentProviderResult>
 }
 internal class ResolverDirectoryContent(private val resolver:ContentResolver):DirectoryContent {
-    override fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?)=resolver.query(uri,columns,where,args,null)
+    override fun query(uri:Uri,columns:Array<String>,where:String?,args:Array<String>?,sortOrder:String?)=resolver.query(uri,columns,where,args,sortOrder)
     override fun applyBatch(authority:String,ops:ArrayList<Op>)=resolver.applyBatch(authority,ops)
 }
 internal class DirectoryProvider(private val ctx: Context,private val content:DirectoryContent=ResolverDirectoryContent(ctx.contentResolver)) {
@@ -49,19 +53,20 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
             (kind != "contacts.write" || allowed("contacts.read"))
     }
 
-    private fun query(uri: Uri, columns: Array<String>, where: String?, args: Array<String>?) =
-        checkNotNull(content.query(uri, columns, where, args)) { "系统数据源不可用" }
+    private fun query(uri: Uri, columns: Array<String>, where: String?, args: Array<String>?, sortOrder:String?=null) =
+        checkNotNull(content.query(uri, columns, where, args, sortOrder)) { "系统数据源不可用" }
 
     @Volatile private var dataReadOnlyColumn=true
+    @Volatile private var supportsEntityOrder=true
     /** Some OEM providers reject this optional projection. Never impersonate a sync adapter:
      * retain raw-account guards and exact affected-row checks so Provider-enforced read-only
      * fields still roll back the entire write batch. */
-    private fun queryData(columns:Array<String>,where:String,args:Array<String>):Cursor {
+    private fun queryData(columns:Array<String>,where:String,args:Array<String>,sortOrder:String?=null):Cursor {
         val wanted=if(dataReadOnlyColumn)columns else columns.filter{it!=Data.IS_READ_ONLY}.toTypedArray()
-        return try { query(Data.CONTENT_URI,wanted,where,args) }
+        return try { query(Data.CONTENT_URI,wanted,where,args,sortOrder) }
         catch(error:IllegalArgumentException){
             if(Data.IS_READ_ONLY !in wanted || !error.message.orEmpty().contains(Data.IS_READ_ONLY,true))throw error
-            val fallback=query(Data.CONTENT_URI,wanted.filter{it!=Data.IS_READ_ONLY}.toTypedArray(),where,args)
+            val fallback=query(Data.CONTENT_URI,wanted.filter{it!=Data.IS_READ_ONLY}.toTypedArray(),where,args,sortOrder)
             dataReadOnlyColumn=false
             fallback
         }
@@ -78,45 +83,124 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
     private fun nativeRevision(version:String,values:List<String>,name:Pair<String,String>) =
         version+"."+PrivateStore.hash("android-native-v1\u0000"+(values+name.first+name.second).joinToString("\u0000"))
 
-    /** A coherent raw-contacts metadata cursor supplies the list of surviving IDs and
-     * revisions. Read Data only for changed IDs. A null/failed cursor is never a snapshot. */
+    private data class PhoneField(val id:Long,val number:String,val superPrimary:Boolean)
+    private class ChangedRaw(val id:String,val aggregate:String,val version:String,val stamp:String,val record:JSONObject) {
+        val phones=mutableListOf<PhoneField>()
+    }
+
+    /** Keep the provider write precondition stable. Only the local scan stamp changes
+     * when the representation needs to be republished to an existing peer. */
     fun scanContacts(previous: Map<String,String>, observe: (String,String,JSONObject?) -> Unit) {
+        val displays=query(Contacts.CONTENT_URI,arrayOf(Contacts._ID,Contacts.DISPLAY_NAME_PRIMARY,Contacts.NAME_RAW_CONTACT_ID),null,null).use { rows ->
+            buildMap { while(rows.moveToNext())put(rows.getString(0),rows.getString(1).orEmpty() to rows.getString(2).orEmpty()) }
+        }
         val columns = arrayOf(RawContacts._ID, RawContacts.VERSION, RawContacts.CONTACT_ID,
             RawContacts.RAW_CONTACT_IS_READ_ONLY, RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME,
             RawContacts.SOURCE_ID)
+        val batch=ArrayList<ChangedRaw>(128)
+        fun flush() {
+            if(batch.isEmpty())return
+            loadChanged(batch)
+            for(raw in batch)observe(raw.id,raw.stamp,raw.record)
+            batch.clear()
+        }
         query(RawContacts.CONTENT_URI, columns, "deleted=0", null).use { raw ->
             while (raw.moveToNext()) {
                 val id = raw.getString(0)
                 val version = raw.getString(1)
-                val display=aggregateName(raw.getString(2))
-                val stamp=nativeRevision(version,(1..6).map{raw.getString(it).orEmpty()},display)
+                val aggregate=raw.getString(2)
+                val display=checkNotNull(displays[aggregate]) { "系统联系人正在改变" }
+                val revision=nativeRevision(version,(1..6).map{raw.getString(it).orEmpty()},display)
+                val stamp="phone-order-v2:"+revision
                 if (stamp == previous[id]) { observe(id, stamp, null); continue }
-                val data = JSONObject().put("rawId",id).put("contactId",raw.getString(2))
-                    .put("revision",stamp).put("readOnly",raw.getInt(3) != 0)
-                val numbers = linkedSetOf<String>()
-                var name = ""
-                queryData(arrayOf(Data.MIMETYPE,Data.DATA1,Data.IS_READ_ONLY),
-                    "raw_contact_id=? AND mimetype IN (?,?)", arrayOf(id,Phone.CONTENT_ITEM_TYPE,StructuredName.CONTENT_ITEM_TYPE)).use { fields ->
-                    while (fields.moveToNext()) {
-                        val value = fields.getString(1).orEmpty()
-                        if (fieldReadOnly(fields)) data.put("readOnly",true)
-                        if (fields.getString(0) == Phone.CONTENT_ITEM_TYPE && value.isNotBlank()) numbers.add(value)
-                        if (fields.getString(0) == StructuredName.CONTENT_ITEM_TYPE) name = value
+                val record=JSONObject().put("rawId",id).put("contactId",aggregate).put("revision",revision)
+                    .put("readOnly",raw.getInt(3)!=0).put("name","").put("displayName",display.first).put("nameRawId",display.second)
+                batch.add(ChangedRaw(id,aggregate,version,stamp,record))
+                if(batch.size==128)flush()
+            }
+        }
+        flush()
+    }
+
+    private fun loadChanged(batch:List<ChangedRaw>) {
+        val byId=batch.associateBy { it.id }
+        val ids=byId.keys.toTypedArray()
+        val placeholders=ids.joinToString(",") { "?" }
+        val columns=arrayOf(Data.RAW_CONTACT_ID,Data.MIMETYPE,Data.DATA1,Data.IS_SUPER_PRIMARY,Data._ID,Data.IS_READ_ONLY)
+        queryData(columns,"raw_contact_id IN ($placeholders) AND mimetype IN (?,?)",
+            ids+arrayOf(Phone.CONTENT_ITEM_TYPE,StructuredName.CONTENT_ITEM_TYPE),"raw_contact_id ASC, _id ASC").use { fields ->
+            while(fields.moveToNext()){
+                val raw=byId.getValue(fields.getString(0))
+                val value=fields.getString(2).orEmpty()
+                if(fieldReadOnly(fields))raw.record.put("readOnly",true)
+                when(fields.getString(1)){
+                    StructuredName.CONTENT_ITEM_TYPE -> raw.record.put("name",value)
+                    Phone.CONTENT_ITEM_TYPE -> if(value.isNotBlank())raw.phones.add(PhoneField(fields.getLong(4),value,fields.getInt(3)!=0))
+                }
+            }
+        }
+        // MIUI's details screen walks the aggregate's entity cursor. A filtered Data
+        // query can pick a different index and return the same rows in another order.
+        for((aggregate,raws) in batch.filter { it.phones.size>1 }.groupBy { it.aggregate }){
+            val positions=entityPositions(aggregate) ?: break
+            for(raw in raws)raw.phones.sortBy { checkNotNull(positions[it.id]) { "系统联系人正在改变" } }
+        }
+        for(raw in batch){
+            // The native detail view prepends each super-primary row and appends
+            // every other row. IS_PRIMARY is account-local and does not affect order.
+            val (preferred,ordinary)=raw.phones.partition { it.superPrimary }
+            val numbers=linkedSetOf<String>()
+            for(field in preferred.asReversed())numbers.add(field.number)
+            raw.record.put("superPrimaryCount",numbers.size)
+            for(field in ordinary)numbers.add(field.number)
+            raw.record.put("numbers",JSONArray(numbers.toList()))
+        }
+        loadPhotos(byId,ids)
+        val verified=query(RawContacts.CONTENT_URI,arrayOf(RawContacts._ID,RawContacts.VERSION),"_id IN ($placeholders) AND deleted=0",ids).use { rows ->
+            buildMap { while(rows.moveToNext())put(rows.getString(0),rows.getString(1)) }
+        }
+        check(batch.all { verified[it.id]==it.version }) { "通讯录正在改变，等待下一次完整扫描" }
+    }
+
+    /** An OEM that explicitly rejects this endpoint still has the ordered Data rows.
+     * A failed/missing cursor on a supported provider must instead retry the scan. */
+    private fun entityPositions(aggregate:String):Map<Long,Int>? {
+        if(!supportsEntityOrder)return null
+        val uri=ContentUris.withAppendedId(Contacts.CONTENT_URI,aggregate.toLong())
+            .buildUpon().appendPath(Contacts.Entity.CONTENT_DIRECTORY).build()
+        try {
+            return query(uri,arrayOf(Contacts.Entity.DATA_ID,Data.MIMETYPE),null,null,Data.RAW_CONTACT_ID).use { rows ->
+                buildMap { while(rows.moveToNext())if(rows.getString(1)==Phone.CONTENT_ITEM_TYPE)put(rows.getLong(0),rows.position) }
+            }
+        } catch(_:UnsupportedOperationException) {
+            supportsEntityOrder=false
+        } catch(error:IllegalArgumentException) {
+            val reason=error.message.orEmpty().lowercase(java.util.Locale.ROOT)
+            if(listOf("unknown uri","unknown url","unsupported uri","invalid column data_id").none { it in reason })throw error
+            supportsEntityOrder=false
+        }
+        return null
+    }
+
+    private fun loadPhotos(byId:Map<String,ChangedRaw>,ids:Array<String>){
+        val selection="raw_contact_id IN ("+ids.joinToString(",") { "?" }+") AND mimetype=?"
+        try {
+            query(Data.CONTENT_URI,arrayOf(Data.RAW_CONTACT_ID,Photo.PHOTO),selection,ids+Photo.CONTENT_ITEM_TYPE).use { photos ->
+                while(photos.moveToNext()){
+                    val record=byId.getValue(photos.getString(0)).record
+                    if(!record.has("photo")&&!photos.isNull(1)){
+                        val bytes=photos.getBlob(1)
+                        if(bytes!=null&&bytes.size in 1..16384)record.put("photo",Base64.encodeToString(bytes,Base64.NO_WRAP))
                     }
                 }
-                data.put("name",name).put("displayName",display.first).put("nameRawId",display.second).put("numbers",JSONArray(numbers.toList()))
-                query(Data.CONTENT_URI, arrayOf(Photo.PHOTO), "raw_contact_id=? AND mimetype=?",
-                    arrayOf(id,Photo.CONTENT_ITEM_TYPE)).use { photo ->
-                    if (photo.moveToFirst() && !photo.isNull(0)) {
-                        val bytes = photo.getBlob(0)
-                        if (bytes != null && bytes.size in 1..16384)
-                            data.put("photo",Base64.encodeToString(bytes,Base64.NO_WRAP))
-                    }
-                }
-                query(RawContacts.CONTENT_URI,arrayOf(RawContacts._ID),"_id=? AND version=? AND deleted=0",arrayOf(id,version)).use {
-                    check(it.moveToFirst()) { "通讯录正在改变，等待下一次完整扫描" }
-                }
-                observe(id,stamp,data)
+            }
+        } catch(error:SQLiteException) {
+            // Binder may deliver a provider's BlobTooBig as plain SQLiteException.
+            if(error !is SQLiteBlobTooBigException && !error.message.orEmpty().contains("row too big",true))throw error
+            if(ids.size>1){
+                val middle=ids.size/2
+                loadPhotos(byId,ids.copyOfRange(0,middle))
+                loadPhotos(byId,ids.copyOfRange(middle,ids.size))
             }
         }
     }

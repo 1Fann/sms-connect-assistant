@@ -24,14 +24,19 @@ export function appendAndroidNumber(contact:Contact,source:ContactSource,number:
 export async function checkAndroidWrite(result:AndroidWrite,alive:()=>boolean,onStatus:(message:string)=>void):Promise<boolean>{
  if(result.state==='done')return true;
  if(!result.jobId)throw Error('没有收到安卓写入任务，请返回后核对');
- for(let attempt=0;attempt<12&&alive();attempt++){
-  const response=await api<{items:{id:string,state:string,detail:string}[]}>('contact-sync/jobs?contactId='+encodeURIComponent(result.id));
+ const query=new URLSearchParams({contactId:result.id,jobId:result.jobId});
+ // Check a fast local save promptly, then give slower/offline devices more time between reads.
+ const waits=[0,150,300,550,1000,1500,2000,2500,3000,4000];
+ for(const wait of waits){
+  if(!alive())return false;
+  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
+  if(!alive())return false;
+  const response=await api<{items:{id:string,state:string,detail:string}[]}>('contact-sync/jobs?'+query);
   if(!alive())return false;
   const job=response.items.find(item=>item.id===result.jobId);
   if(job?.state==='done')return true;
   if(job&&job.state!=='queued')throw Error(job.detail||'安卓未能保存，请返回并核对权限或当前联系人');
   onStatus('已提交到安卓，正在等待手机确认写入…');
-  if(attempt<11)await new Promise(resolve=>setTimeout(resolve,800));
  }
  return false;
 }

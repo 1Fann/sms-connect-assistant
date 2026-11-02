@@ -9,11 +9,14 @@ import java.util.concurrent.Executors
 
 /** Only small durable deltas travel with a peer heartbeat. Provider I/O happens off
  * the SMS loop. Each pairing credential has its own journal and acknowledgements. */
-class PeerDirectoryAgent(context:Context, private val link:String) {
+class PeerDirectoryAgent internal constructor(context:Context, private val link:String,
+    private val service:DirectoryService, private val provider:DirectoryProvider) {
+    constructor(context:Context, link:String):this(context,link,DirectoryService.get(context),DirectoryProvider(context.applicationContext))
     private val ctx=context.applicationContext
-    private val provider=DirectoryProvider(ctx)
-    private val db get()=DirectoryService.get(ctx).database.writableDatabase
+    private val db get()=service.database.writableDatabase
+    private val monitor get()=service.monitor
     private val local = link == LOCAL_LINK
+    private val workerKey=service.database.databaseName+":"+link
 
     private fun stillLinked(): Boolean {
         if(local)return ctx.getSharedPreferences("iphone",0).getBoolean("enabled",false)
@@ -29,6 +32,7 @@ class PeerDirectoryAgent(context:Context, private val link:String) {
         val canCalls=provider.allowed("calls.read")
         if(!canCalls && db.scalar("SELECT 1 FROM call_baselines WHERE link=?",link)!=null)
             db.execSQL("DELETE FROM call_baselines WHERE link=?",arrayOf(link))
+        monitor.updateAccess(canRead)
         scheduleScan(canRead,canCalls)
         val out=JSONObject().put("contacts",canRead).put("write",canWrite).put("calls",canCalls)
         val events=JSONArray()
@@ -59,23 +63,38 @@ class PeerDirectoryAgent(context:Context, private val link:String) {
                 db.execSQL("UPDATE applied SET acked=1 WHERE link=? AND id=?",arrayOf(link,id))
             }
         }
-        val job=response.optJSONObject("job")?:return
+        // A bounded packet was accepted. Drain further batches promptly, including
+        // packets cut short by the byte limit before reaching the row limit.
+        if(acks.length()>0)monitor.wake()
+        response.optJSONObject("job")?.let(::offerWrite)
+    }
+
+    internal fun offerWrite(job:JSONObject) {
         val id=job.getString("id")
-        val key=link+":"+id
+        val key=workerKey+":"+id
         synchronized(inFlight){if(!inFlight.add(key))return}
-        executor.execute {
+        writer.execute {
             try{
-                if(!stillLinked())return@execute
-                if(db.scalar("SELECT id FROM applied WHERE link=? AND id=?",link,id)!=null){
+                fun ready()=stillLinked() && (!local || service.localWriteActive(id))
+                if(!ready())return@execute
+                val saved=db.scalar("SELECT result FROM applied WHERE link=? AND id=?",link,id)
+                val receipt=if(saved!=null){
                     db.execSQL("UPDATE applied SET acked=0 WHERE link=? AND id=?",arrayOf(link,id))
+                    JSONObject(saved)
                 } else {
-                    val result=provider.apply(link,job,::stillLinked){
-                        val values=android.content.ContentValues().apply{put("link",link);put("id",id)}
-                        db.insertWithOnConflict("attempts",null,values,SQLiteDatabase.CONFLICT_IGNORE)!=-1L
+                    val result=provider.apply(link,job,::ready){
+                        db.atomic {
+                            if(!ready())return@atomic false
+                            val values=android.content.ContentValues().apply{put("link",link);put("id",id)}
+                            db.insertWithOnConflict("attempts",null,values,SQLiteDatabase.CONFLICT_IGNORE)!=-1L
+                        }
                     }
                     db.execSQL("INSERT OR IGNORE INTO applied(link,id,result) VALUES(?,?,?)",arrayOf(link,id,result.toString()))
-                    synchronized(scans){scans.remove(link)}
+                    if(result.optString("state")=="done")monitor.invalidateContacts()
+                    result
                 }
+                if(local)service.acceptLocalReceipt(receipt)
+                monitor.wakeWrite()
             }catch(_:Exception){ /* Retry the same operation UUID on the next offer. */ }
             finally { synchronized(inFlight){inFlight.remove(key)} }
         }
@@ -84,15 +103,22 @@ class PeerDirectoryAgent(context:Context, private val link:String) {
     private fun scheduleScan(contacts:Boolean,calls:Boolean) {
         if(!contacts && !calls)return
         val now=SystemClock.elapsedRealtime()
+        val generation=monitor.generation
+        val scanContacts:Boolean
+        val scanCalls:Boolean
         synchronized(scans){
-            if(now-(scans[link]?:-60_000L)<30_000L)return
-            synchronized(inFlight){if(!inFlight.add(link))return}
-            scans[link]=now
+            val last=scans.getOrPut(workerKey){ScanTimes()}
+            scanContacts=contacts && (generation!=last.generation || now-last.contacts>=30_000L)
+            scanCalls=calls && now-last.calls>=30_000L
+            if(!scanContacts && !scanCalls)return
+            synchronized(inFlight){if(!inFlight.add(workerKey))return}
+            if(scanContacts){last.generation=generation;last.contacts=now}
+            if(scanCalls)last.calls=now
         }
-        executor.execute {
+        scanner.execute {
             try {
                 if(!stillLinked())return@execute
-                if(contacts){
+                if(scanContacts){
                     val status=ctx.getSharedPreferences("directory-sync",0)
                     runCatching{scan("contact")}.onSuccess{
                         status.edit().remove("contact-error").putLong("contact-checked",System.currentTimeMillis()).apply()
@@ -106,8 +132,11 @@ class PeerDirectoryAgent(context:Context, private val link:String) {
                         status.edit().putString("contact-error",message).putLong("contact-checked",System.currentTimeMillis()).apply()
                     }
                 }
-                if(calls)runCatching{scan("call")}
-            } finally { synchronized(inFlight){inFlight.remove(link)} }
+                if(scanCalls)runCatching{scan("call")}
+            } finally {
+                synchronized(inFlight){inFlight.remove(workerKey)}
+                monitor.wake()
+            }
         }
     }
 
@@ -165,8 +194,10 @@ class PeerDirectoryAgent(context:Context, private val link:String) {
 
     companion object {
         internal const val LOCAL_LINK="local-directory"
-        private val executor=Executors.newSingleThreadExecutor()
-        private val scans=HashMap<String,Long>()
+        private val scanner=Executors.newSingleThreadExecutor()
+        private val writer=Executors.newSingleThreadExecutor()
+        private data class ScanTimes(var contacts:Long= -60_000L,var calls:Long= -60_000L,var generation:Long= -1L)
+        private val scans=HashMap<String,ScanTimes>()
         private val inFlight=HashSet<String>()
     }
 }

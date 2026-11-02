@@ -13,8 +13,13 @@ const server=http.createServer((req,res)=>{
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL||'msedge',headless:true});
  try{
- const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});const writes=[],errors=[];
+ const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,serviceWorkers:'block'});const writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>{
+   const viewport=Object.assign(new EventTarget(),{height:844,width:390,offsetTop:0,scale:1});
+   Object.defineProperty(window,'visualViewport',{get:()=>viewport});
+   window.fixtureVV=viewport;
+ });
  const screenshots=path.resolve(__dirname,'../../.work/contacts-ui');
  fs.mkdirSync(screenshots,{recursive:true});
  const photo=await page.evaluate(()=>{
@@ -23,20 +28,27 @@ const server=http.createServer((req,res)=>{
    ctx.beginPath();ctx.moveTo(0,56);ctx.lineTo(38,15);ctx.lineTo(64,48);ctx.lineTo(64,64);ctx.lineTo(0,64);ctx.fill();
    return canvas.toDataURL('image/png').split(',')[1];
  });
- const row={id:'demo',name:'合成联系人',numbers:['5550100','5550101'],deviceId:'server',primaryRawId:'raw',sources:[{deviceId:'server',rawId:'raw',contactId:'5',revision:'source-2',name:'合成联系人',numbers:['5550100','5550101'],readOnly:false}],revision:2,favorite:false,conflict:false};
+ // Android's display order can differ from numeric order.
+ const phoneNumbers=['5550107','5550101'];
+ const row={id:'demo',name:'合成联系人',numbers:phoneNumbers,deviceId:'server',primaryRawId:'raw',sources:[{deviceId:'server',rawId:'raw',contactId:'5',revision:'source-2',name:'合成联系人',numbers:phoneNumbers,readOnly:false}],revision:2,favorite:false,conflict:false};
  const cards=[row,...['岸桥','北辰','彩禾','冬青','枫林','河谷','江城','蓝石','南星','松石','云舟','栀子'].map((name,index)=>{
    const number='55502'+String(index).padStart(2,'0');
    return {...row,id:'extra-'+index,name,numbers:[number],photo:name==='北辰'?photo:undefined,
      sources:[{...row.sources[0],name,numbers:[number]}]};
  })];
+ const longNumbers=Array.from({length:12},(_,index)=>'55503'+String(index).padStart(2,'0'));
+ const longCard={...row,id:'long',name:'多号样例',numbers:longNumbers,
+   sources:[{...row.sources[0],name:'多号样例',numbers:longNumbers}]};
+ cards.push(longCard);
  let canEdit=true;
  await page.route('**/api/**',async route=>{
    const req=route.request(),url=new URL(req.url()),endpoint=url.pathname.replace('/api/v2/','');
    const data={
     session:{installationId:'test',permissions:['contacts.read','calls.read',...(canEdit?['contacts.write']:[])]},
     devices:[{deviceId:'server',name:'主机',online:true,contactsWrite:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · A',online:true,confirmed:true}],
-    'call-history/missed':{count:0},'call-history/seen':{count:0},'voice/history':[],contacts:{items:cards.filter(card=>card.name.includes(url.searchParams.get('q')||'')),next:null},
-    'contact-sync/jobs':{items:[{id:'job',state:'done',detail:''}]},'call-history':{items:[{id:'record1',name:'合成联系人',number:'5550100',deviceId:'server',type:'missed',date:1720000000000,duration:0}],next:null},
+    'call-history/missed':{count:0},'call-history/seen':{count:0},'voice/history':[],
+    'contacts/version':{version:'fixture'},contacts:{items:cards.filter(card=>card.name.includes(url.searchParams.get('q')||'')),next:null,version:'fixture'},
+    'contact-sync/jobs':{items:[{id:'job',state:'done',detail:''}]},'call-history':{items:[{id:'record1',name:'合成联系人',number:phoneNumbers[0],deviceId:'server',type:'missed',date:1720000000000,duration:0}],next:null},
    };
    for(const card of cards)data['contacts/'+card.id]=card;
    if(req.method()!=='GET'&&endpoint!=='call-history/seen')writes.push([endpoint,req.postDataJSON()]);
@@ -47,7 +59,7 @@ const server=http.createServer((req,res)=>{
  await page.locator('nav button').filter({hasText:'通话'}).click();
  await page.getByRole('button',{name:'合成联系人',exact:false}).first().click();
  await page.getByRole('button',{name:'拨打此号码'}).click();
- assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),'5550100');
+ assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),phoneNumbers[0]);
  assert.ok(await page.getByRole('button',{name:'拨打',exact:true}).isDisabled());
  await page.locator('nav button').filter({hasText:'联系人'}).click();
  const list=page.locator('#phone-app');
@@ -75,17 +87,133 @@ const server=http.createServer((req,res)=>{
  assert.ok(Math.abs((await list.locator('.phone-toolbar').boundingBox()).y-toolbarTop)<12,'Contact toolbar moved off screen');
  await firstLetter.press('Enter');
  await page.waitForFunction(()=>document.querySelector('#phone-app').scrollTop<50);
- await simulatedInsets.evaluate(style=>style.remove());
 
  await openCard('北辰');
  await sheet.locator('img').first().waitFor();
  assert.ok(await sheet.locator('img').first().evaluate(async img=>{await img.decode();return img.naturalWidth===64}),'Contact photo is not decoded on the detail page');
  const onlyNumberLink=sheet.getByLabel('给联系人发短信',{exact:true});
  assert.equal(new URL(await onlyNumberLink.getAttribute('href')).hash,'#compose=5550201');
+ const editor=page.getByRole('dialog',{name:'编辑联系人',exact:true});
+ const numberPad=page.getByRole('group',{name:'电话号码键盘',exact:true});
+ const padKey=name=>numberPad.getByRole('button',{name,exact:true});
+ async function viewport(height,offsetTop){
+   await page.evaluate(({height,offsetTop})=>{
+     Object.assign(window.fixtureVV,{height,offsetTop});
+     window.fixtureVV.dispatchEvent(new Event('resize'));
+     window.fixtureVV.dispatchEvent(new Event('scroll'));
+   },{height,offsetTop});
+   await page.waitForFunction(({height,offsetTop})=>{
+     const top=parseFloat(document.documentElement.style.getPropertyValue('--viewport-top'));
+     return top===offsetTop && (document.documentElement.dataset.keyboardOpen==='true')===(height<844);
+   },{height,offsetTop});
+ }
+ async function keyboardGeometry(height,offsetTop,short){
+   await viewport(height,offsetTop);
+   // Check the field against what is actually visible, including Safari's pan.
+   await page.waitForFunction(({height,offsetTop,short})=>{
+     const form=document.querySelector('.ios-editor-edit');
+     const scroll=form.querySelector('.ios-editor-scroll').getBoundingClientRect();
+     const toolbar=form.querySelector('.ios-editor-toolbar').getBoundingClientRect();
+     const focus=document.activeElement.getBoundingClientRect();
+     const avatar=form.querySelector('.poster-avatar').getBoundingClientRect();
+     return document.activeElement.matches('input') && window.scrollY===0 && toolbar.top>=offsetTop-1 &&
+       focus.top>=Math.max(scroll.top,toolbar.bottom)-1 && focus.bottom<=Math.min(scroll.bottom,offsetTop+height)+1 &&
+       (!short || (avatar.top>=scroll.top-1 && avatar.bottom<=scroll.bottom+1));
+   },{height,offsetTop,short},{timeout:4000});
+   // The system keyboard is translucent. Sample the pixels it would composite over.
+   const shot=await page.screenshot({clip:{x:6,y:offsetTop+height+30,width:3,height:3},animations:'disabled'});
+   const pixels=await editor.evaluate(async(form,base64)=>{
+     const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();
+     const canvas=document.createElement('canvas');canvas.width=2;canvas.height=1;
+     const ctx=canvas.getContext('2d');ctx.drawImage(img,1,1,1,1,0,0,1,1);
+     ctx.fillStyle=getComputedStyle(form).backgroundColor;ctx.fillRect(1,0,1,1);
+     return Array.from(ctx.getImageData(0,0,2,1).data);
+   },shot.toString('base64'));
+   assert.ok(pixels[7]===255 && [0,1,2,3].every(channel=>Math.abs(pixels[channel]-pixels[4+channel])<=2),
+     'The area behind the keyboard should paint the opaque editor background: '+pixels.join(','));
+ }
+ async function visibleAbovePad(short){
+   await numberPad.waitFor();
+   await page.waitForFunction(short=>{
+     const form=document.querySelector('.ios-editor-edit');
+     const toolbar=form.querySelector('.ios-editor-toolbar').getBoundingClientRect();
+     const scroll=form.querySelector('.ios-editor-scroll').getBoundingClientRect();
+     const pad=document.querySelector('.phone-number-pad').getBoundingClientRect();
+     const input=document.activeElement;
+     const focus=input.getBoundingClientRect();
+     const avatar=form.querySelector('.poster-avatar').getBoundingClientRect();
+     return input.matches('input[data-phone-id]') && input.inputMode==='none' &&
+       document.documentElement.dataset.keyboardOpen!=='true' && window.scrollY===0 &&
+       focus.top>=Math.max(scroll.top,toolbar.bottom)-1 && focus.bottom<=Math.min(scroll.bottom,pad.top)+1 &&
+       (!short || (avatar.top>=scroll.top-1 && avatar.bottom<=Math.min(scroll.bottom,pad.top)+1));
+   },short,{timeout:4000});
+ }
+ async function setSelection(field,start,end=start){
+   await field.evaluate((el,[start,end])=>el.setSelectionRange(start,end),[start,end]);
+ }
+ await sheet.getByRole('button',{name:'编辑',exact:true}).click();
+ await editor.getByLabel('姓名',{exact:true}).click();
+ await keyboardGeometry(492,26,true);
+ await keyboardGeometry(492,64,true);
+ assert.ok(await numberPad.isHidden(),'Name editing uses the iOS keyboard');
+ const shortPhone=editor.getByLabel('联系人电话号码',{exact:true});
+ await shortPhone.click();
+ await viewport(844,0);
+ await visibleAbovePad(true);
+ await page.screenshot({path:path.join(screenshots,'contact-edit-short-number-pad.png'),animations:'disabled'});
+ const original=await shortPhone.inputValue();
+ await setSelection(shortPhone,1,4);
+ await padKey('8').tap();
+ const replaced=original.slice(0,1)+'8'+original.slice(4);
+ assert.equal(await shortPhone.inputValue(),replaced);
+ await padKey('0').tap();
+ assert.equal(await shortPhone.inputValue(),replaced.slice(0,2)+'0'+replaced.slice(2));
+ assert.ok(await shortPhone.evaluate(input=>document.activeElement===input),'Tapping keys keeps the phone field focused');
+ await padKey('退格').click();
+ assert.equal(await shortPhone.inputValue(),replaced);
+ await setSelection(shortPhone,1,3);
+ await padKey('退格').click();
+ const shortened=replaced.slice(0,1)+replaced.slice(3);
+ assert.equal(await shortPhone.inputValue(),shortened);
+ await setSelection(shortPhone,0);
+ await padKey('切换到符号键盘').click();
+ for(const key of ['加号','星号','井号'])await padKey(key).click();
+ assert.equal(await shortPhone.inputValue(),'+*#'+shortened);
+ await padKey('返回数字键盘').click();
+ await padKey('收起键盘').click();
+ await numberPad.waitFor({state:'hidden'});
+ await viewport(844,0);
+ assert.ok(await numberPad.isHidden(),'Viewport events must not reopen a dismissed keypad');
+ await shortPhone.click();
+ await numberPad.waitFor();
+ await editor.getByLabel('姓名',{exact:true}).click();
+ await numberPad.waitFor({state:'hidden'});
+ await keyboardGeometry(492,24,true);
+ await viewport(844,0);
+ await editor.getByRole('button',{name:'取消',exact:true}).click();
+ await sheet.getByRole('button',{name:'返回',exact:true}).click();
+ await sheet.waitFor({state:'hidden'});
+ await openCard(longCard.name);
+ await sheet.getByRole('button',{name:'编辑',exact:true}).click();
+ const longPhone=editor.getByLabel('联系人电话号码 12',{exact:true});
+ await longPhone.click();
+ await visibleAbovePad(false);
+ await page.screenshot({path:path.join(screenshots,'contact-edit-long-number-pad.png'),animations:'disabled'});
+ const otherPhone=editor.getByLabel('联系人电话号码 11',{exact:true});
+ const untouched=await longPhone.inputValue();
+ await otherPhone.click();
+ await setSelection(otherPhone,0);
+ await padKey('4').click();
+ assert.equal(await otherPhone.inputValue(),'4'+longNumbers[10]);
+ assert.equal(await longPhone.inputValue(),untouched);
+ await padKey('收起键盘').click();
+ await editor.getByRole('button',{name:'取消',exact:true}).click();
+ await simulatedInsets.evaluate(style=>style.remove());
  await sheet.getByRole('button',{name:'返回',exact:true}).click();
  await sheet.waitFor({state:'hidden'});
  await openCard(row.name);
  await sheet.waitFor();
+ assert.deepEqual(await sheet.locator('.directory-phone-row b').allTextContents(),phoneNumbers);
  await page.screenshot({path:path.join(screenshots,'contact-detail.png'),animations:'disabled'});
  const editButton=sheet.getByRole('button',{name:'编辑',exact:true});
  const backButton=sheet.getByRole('button',{name:'返回',exact:true});
@@ -97,12 +225,13 @@ const server=http.createServer((req,res)=>{
  const smsPicker=page.getByRole('dialog',{name:'选择短信号码',exact:true});
  await smsPicker.waitFor();
  const links=await smsPicker.getByRole('link').evaluateAll(nodes=>nodes.map(a=>a.href));
- assert.deepEqual(links.map(href=>new URL(href).hash),['#compose=5550100','#compose=5550101']);
+ assert.deepEqual(links.map(href=>new URL(href).hash),phoneNumbers.map(number=>'#compose='+number));
  assert.ok(links.every(href=>new URL(href).protocol==='https:'&&new URL(href).port==='8443'&&!new URL(href).search));
  await page.keyboard.press('Escape');
  await smsPicker.waitFor({state:'hidden'});
  await call.click();
  const callPicker=page.getByRole('dialog',{name:'选择拨号号码',exact:true});
+ assert.deepEqual(await callPicker.getByRole('button').filter({hasText:/^\d+$/}).allTextContents(),phoneNumbers);
  await callPicker.getByRole('button',{name:/5550101/}).click();
  assert.equal(await page.getByLabel('电话号码',{exact:true}).inputValue(),'5550101');
  assert.deepEqual(writes,[],'Opening a detail or choosing a number must not write or dial');
@@ -113,12 +242,17 @@ const server=http.createServer((req,res)=>{
  await page.screenshot({path:path.join(screenshots,'contact-detail-dark.png'),animations:'disabled'});
  await page.emulateMedia({colorScheme:'light'});
  await editButton.click();
- const editor=page.getByRole('dialog',{name:'编辑联系人',exact:true});
  await editor.waitFor();
+ assert.deepEqual(await editor.locator('input[data-phone-id]').evaluateAll(inputs=>inputs.map(input=>input.value)),phoneNumbers);
  assert.ok(await editor.getByRole('button',{name:'完成',exact:true}).isDisabled(),'An unchanged contact must not generate a write');
  await page.screenshot({path:path.join(screenshots,'contact-edit.png'),animations:'disabled'});
  await editor.getByRole('button',{name:'添加电话',exact:true}).click();
- await editor.getByLabel('联系人电话号码 3',{exact:true}).fill('5550102');
+ const newNumber=editor.getByLabel('联系人电话号码 3',{exact:true});
+ await numberPad.waitFor();
+ assert.equal(await newNumber.evaluate(el=>el===document.activeElement&&el.inputMode==='none'),true);
+ for(const digit of '5550102')await padKey(digit).click();
+ assert.equal(await newNumber.inputValue(),'5550102');
+ await padKey('收起键盘').click();
  await editor.getByRole('button',{name:'移除第 1 个电话号码',exact:true}).click();
  await editor.getByRole('button',{name:'删除',exact:true}).click();
  assert.equal(await editor.getByLabel('联系人电话号码',{exact:true}).inputValue(),'5550101');
@@ -132,14 +266,15 @@ const server=http.createServer((req,res)=>{
  await editor.getByRole('button',{name:'取消',exact:true}).click();
  assert.deepEqual(writes,[],'Removing a number from a cancelled draft must not change Android contacts');
  await editButton.click();
- assert.equal(await editor.getByLabel('联系人电话号码',{exact:true}).inputValue(),'5550100');
+ assert.equal(await editor.getByLabel('联系人电话号码',{exact:true}).inputValue(),phoneNumbers[0]);
  await editor.getByLabel('姓名',{exact:true}).fill('合成备注');
  await editor.getByRole('button',{name:'添加电话',exact:true}).click();
  await editor.getByLabel('联系人电话号码 3',{exact:true}).fill('5550102');
+ await padKey('收起键盘').click();
  await page.getByRole('button',{name:'完成',exact:true}).click();
  await editor.waitFor({state:'hidden'});
  assert.equal(writes.length,1);assert.equal(writes[0][0],'contacts/native/edit');assert.equal(writes[0][1].deviceId,'server');assert.equal(writes[0][1].rawId,'raw');assert.equal('targets' in writes[0][1],false);
- assert.deepEqual(writes[0][1].numbers,['5550100','5550101','5550102']);
+ assert.deepEqual(writes[0][1].numbers,[...phoneNumbers,'5550102']);
  assert.ok(writes[0][1].requestId);assert.equal(writes[0][1].revision,2);
  await editButton.click();await editor.waitFor();
  await dockTab.click();

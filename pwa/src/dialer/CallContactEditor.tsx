@@ -5,6 +5,7 @@ import {PhoneAvatar, PhoneIcon} from './PhoneIcon';
 import {formatPhone, identity} from '../phone';
 import {sectionContacts} from './contactSections';
 import {primarySource, createAndroidContact, editAndroidContact, appendAndroidNumber, checkAndroidWrite, type AndroidWrite} from './androidContacts';
+import {PhoneNumberPad} from './PhoneNumberPad';
 import './contact-editor.css';
 
 type EditorMode = 'create' | 'choose' | 'edit';
@@ -27,6 +28,7 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     return values.map(value => ({id: ++serial.current, value}));
   }
   const [phones, setPhones] = useState(() => draftNumbers(initialSource?.numbers || (number ? [number] : [])));
+  const [padRow,setPadRow]=useState<number|null>(null);
   const [removeId, setRemoveId] = useState<number | null>(null);
   const [raw, setRaw] = useState(initialSource?.rawId || '');
   const writableDevices = devices.filter(device => device.contactsWrite === true);
@@ -83,6 +85,42 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     };
   }, [editPage, mode]);
 
+  useLayoutEffect(() => {
+    const panel=dialog.current?.querySelector<HTMLElement>('.ios-editor-scroll');
+    if(!panel)return;
+    let frame=0;
+    function revealField() {
+      frame=0;
+      const field=document.activeElement;
+      if(!panel || !(field instanceof HTMLInputElement) || !panel.contains(field))return;
+      const bounds=panel.getBoundingClientRect();
+      const row=field.getBoundingClientRect();
+      // On iOS a focus change can pan a short form before the keyboard has its final height.
+      // Scroll only this panel, keeping the avatar when both it and the field fit.
+      if(panel.querySelectorAll('[data-phone-id]').length<=2 && row.bottom-bounds.top+panel.scrollTop+8<=bounds.height) {
+        panel.scrollTop=0;
+      } else if(row.bottom>bounds.bottom-8) {
+        panel.scrollTop+=row.bottom-bounds.bottom+8;
+      } else if(row.top<bounds.top+8) {
+        panel.scrollTop+=row.top-bounds.top-8;
+      }
+    }
+    const schedule=()=>{if(!frame)frame=requestAnimationFrame(revealField)};
+    const resize=new ResizeObserver(schedule);
+    resize.observe(panel);
+    panel.addEventListener('focusin',schedule);
+    const viewport=window.visualViewport;
+    viewport?.addEventListener('resize',schedule);
+    viewport?.addEventListener('scroll',schedule);
+    schedule();
+    return ()=>{
+      cancelAnimationFrame(frame);resize.disconnect();
+      panel.removeEventListener('focusin',schedule);
+      viewport?.removeEventListener('resize',schedule);
+      viewport?.removeEventListener('scroll',schedule);
+    };
+  },[step]);
+
   useEffect(() => {
     if (!editPage) return;
     function leaveViaDock(event: MouseEvent) {
@@ -119,6 +157,7 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
 
   function sourceChange(value: string, card = selected) {
     const chosen = card?.sources.find(item => item.rawId === value);
+    setPadRow(null);
     setRaw(value);
     setName(chosen?.name || '');
     setPhones(draftNumbers(chosen?.numbers || []));
@@ -146,8 +185,30 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
     });
     dialog.current?.querySelector<HTMLInputElement>('[data-phone-id="' + id + '"]')?.focus();
   }
+  function updatePhone(id:number,value:string) {
+    setPhones(previous=>previous.map(row=>row.id===id?{...row,value}:row));
+  }
+  function padInput() {
+    return padRow===null?null:dialog.current?.querySelector<HTMLInputElement>('[data-phone-id="'+padRow+'"]');
+  }
+  function typeOnPad(insert:string) {
+    const input=padInput();
+    if(!input||padRow===null||frozen)return;
+    const end=input.selectionEnd??input.value.length;
+    let start=input.selectionStart??end;
+    if(insert===''&&start===end)start=Math.max(0,start-1);
+    const value=input.value.slice(0,start)+insert+input.value.slice(end);
+    if(value.length>input.maxLength)return;
+    flushSync(()=>updatePhone(padRow,value));
+    input.setSelectionRange(start+insert.length,start+insert.length);
+  }
+  function dismissPad() {
+    padInput()?.blur();
+    setPadRow(null);
+  }
   async function save() {
     if (lock.current || (!submitted && (!valid || !validData)) || step === 'choose') return;
+    setPadRow(null);
     lock.current = true; setBusy(true); setError(''); setStatus('');
     try {
       if (!pending.current) {
@@ -195,7 +256,12 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
   return createPortal(<>
     {sheet && <div className="ios-editor-backdrop" aria-hidden="true" />}
     <section ref={dialog} className={'call-contact-editor ios-editor ' + (sheet ? 'ios-editor-sheet' : 'ios-editor-edit')}
+      data-phone-pad={padRow!==null&&!frozen?'true':undefined}
+      onFocusCapture={event=>{
+        if(!(event.target as HTMLElement).closest('[data-phone-id],.phone-number-pad'))setPadRow(null);
+      }}
       role="dialog" aria-modal={sheet} aria-label={title} onKeyDown={event => {
+        if(event.key==='Escape'&&padRow!==null){event.preventDefault();dismissPad();return}
         if (event.key === 'Escape') {event.preventDefault(); back(); return}
         if (!sheet || event.key !== 'Tab') return;
         const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled)')];
@@ -261,13 +327,14 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
                 <button className="ios-phone-remove" aria-label={'移除第 ' + (index + 1) + ' 个电话号码'} disabled={frozen}
                   aria-expanded={removeId === id} onClick={() => setRemoveId(removeId === id ? null : id)}><span aria-hidden="true">−</span></button>
                 <span className="ios-phone-label">电话</span>
-                <input type="tel" aria-label={index ? '联系人电话号码 ' + (index + 1) : '联系人电话号码'} data-phone-id={id}
-                  autoComplete="off" placeholder="电话号码" maxLength={96} readOnly={frozen} value={value}
-                  onFocus={() => setRemoveId(null)} onChange={event => {
-                    const updated = event.target.value;
-                    setPhones(previous => previous.map(row => row.id === id ? {...row, value: updated} : row));
-                  }} />
+                <input type="text" inputMode="none" aria-label={index ? '联系人电话号码 ' + (index + 1) : '联系人电话号码'} data-phone-id={id}
+                  autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                  placeholder="电话号码" maxLength={96} readOnly={frozen} value={value}
+                  onFocus={()=>{if(!frozen)setPadRow(id);setRemoveId(null)}} onClick={()=>{if(!frozen)setPadRow(id)}}
+                  onKeyDown={event=>{if(event.key==='Enter'&&padRow===id){event.preventDefault();dismissPad()}}}
+                  onChange={event=>updatePhone(id,event.target.value)} />
                 {removeId === id && <button className="ios-phone-delete" disabled={frozen} onClick={() => {
+                  if(padRow===id)setPadRow(null);
                   setPhones(previous => previous.filter(row => row.id !== id)); setRemoveId(null);
                 }}>删除</button>}
               </div>)}
@@ -291,6 +358,7 @@ export function CallContactEditor({number = '', mode, contact, devices, onClose,
         {status && <p role="status">{status}</p>}
         {error && <p role="alert">{error}</p>}
       </div>
+      {padRow!==null&&!frozen&&form&&<PhoneNumberPad onInsert={typeOnPad} onDelete={()=>typeOnPad('')} onDismiss={dismissPad}/>}
     </section>
   </>, portal);
 }

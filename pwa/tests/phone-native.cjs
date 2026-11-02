@@ -31,7 +31,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
    session:{installationId:installation,permissions:['calls.read','calls.dial','contacts.read']},
    devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · SIM 1',slot:1,lineOnline:true,online:true,confirmed:true}],
    'groundwire/routes':{routes:[{lineId:'line-a',prefix:'*81*'}]},'voice/history':[],'call-history/missed':{count:missedCount},
-   'call-history':{items:records,next:null},contacts:{items:[{id:'c',name:'演示联系人',numbers:['5550100'],favorite:false,revision:1,sources:[]}],next:null}
+   'call-history':{items:records,next:null},'contacts/version':{version:'fixture'},contacts:{items:[{id:'c',name:'演示联系人',numbers:['5550100'],favorite:false,revision:1,sources:[]}],next:null,version:'fixture'}
   };
   assert.ok(key in data,'Unexpected API '+key);
   return route.fulfill({contentType:'application/json',body:JSON.stringify(data[key])});

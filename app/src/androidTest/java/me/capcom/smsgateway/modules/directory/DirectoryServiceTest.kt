@@ -35,6 +35,45 @@ class DirectoryServiceTest {
     private fun body(row:JSONObject)=JSONObject().put("id",row.getString("id")).put("revision",row.getLong("revision")).put("requestId",newId())
     private fun edit(action:String,b:JSONObject,allowed:(String)->Boolean=all)=service.mutate("fixture-install",action,b,allowed)
 
+    @Test fun nativeVersionOnlyTracksVisibleContactChanges(){
+        val onlyA:(String)->Boolean={it=="A"}
+        fun version()=service.androidContactsVersion(onlyA)
+        val initial=version()
+        service.sync("A",packet(events=listOf(contact("First"))))
+        val first=version()
+        assertNotEquals(initial,first)
+        service.sync("B",packet(events=listOf(contact("Private"))))
+        service.sync("A",packet(events=listOf(contact("First"))))
+        assertEquals(first,version())
+        service.sync("A",packet().put("write",false))
+        assertNotEquals(first,version())
+        service.sync("A",packet())
+        val visible=service.androidContacts("",0,onlyA).getJSONArray("items").getJSONObject(0)
+        val favorite=body(visible).put("destination","android").put("favorite",true)
+        service.androidMutate("fixture-install","favorite",favorite,onlyA)
+        val starred=version()
+        assertNotEquals(first,starred)
+        service.androidMutate("fixture-install","favorite",favorite,onlyA)
+        assertEquals(starred,version())
+        service.sync("A",packet(events=listOf(contact("Changed",seq=2))))
+        assertNotEquals(starred,version())
+        service.sync("A",packet(contacts=false))
+        assertEquals(initial,version())
+    }
+    @Test fun v3UpgradePreservesTheDirectoryAndTracksTheNextChange(){
+        service.sync("A",packet(events=listOf(contact("Before upgrade"))))
+        val old=service.database.writableDatabase
+        old.execSQL("DROP TABLE directory_versions")
+        old.version=3
+        service.database.close()
+        service=DirectoryService(ctx,DirectoryDb(ctx,databaseName))
+        val version=service.androidContactsVersion(all)
+        val card=service.androidContacts("",0,all).getJSONArray("items").getJSONObject(0)
+        assertEquals("Before upgrade",card.getString("name"))
+        service.sync("A",packet(events=listOf(contact("After upgrade",seq=2))))
+        assertNotEquals(version,service.androidContactsVersion(all))
+    }
+
     @Test fun sourcesMergeConflictSplitAndPermissions(){
         service.sync("A",packet(events=listOf(contact("Alice"))))
         service.sync("B",packet(events=listOf(contact("Alice"))))

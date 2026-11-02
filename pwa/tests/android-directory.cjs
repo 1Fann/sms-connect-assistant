@@ -1,7 +1,7 @@
 // Exercise built CommLink assets with synthetic records, without registering SIP or calling any phone.
 const http=require('node:http'), fs=require('node:fs'), path=require('node:path'), assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const root=path.resolve(__dirname,'../../app/src/main/assets/iphone');
+const root=path.resolve(process.env.PHONE_UI_TEST_ASSETS||path.join(__dirname,'../../app/src/main/assets/iphone'));
 const server=http.createServer((req,res)=>{
  const p=new URL(req.url,'http://localhost').pathname;
  const file=path.resolve(root,'.'+(p==='/phone/'?'/phone/index.html':p));
@@ -15,10 +15,19 @@ const server=http.createServer((req,res)=>{
  try{
  const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});const writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>{
+  const probe=window.shareProbe={calls:[],inClick:false,start:0};
+  document.addEventListener('click',()=>{probe.start=performance.now()},true);
+  Object.defineProperty(navigator,'share',{value:payload=>{
+   probe.calls.push({text:payload.text,ms:performance.now()-probe.start,inClick:probe.inClick});
+   return new Promise((resolve,reject)=>{probe.finish=reason=>reason?reject(new DOMException('fixture',reason)):resolve()});
+  }});
+ });
 
  let state='queued',reads=0,nativeEmpty=false,scanError='';const mutations=[];
  const row={id:'android-card',deviceId:'B',name:'安卓演示',numbers:['5550100'],revision:8,favorite:false,conflict:true,primaryRawId:'raw-7',
   sources:[{deviceId:'B',rawId:'raw-7',contactId:'11',revision:'native-v1',name:'安卓演示',numbers:['5550100'],readOnly:false}]};
+ let cards=[row],version='v1',listReads=0,detailReads=0,versionReads=0;
  await page.route('**/api/**',async route=>{
   const req=route.request(),url=new URL(req.url()),endpoint=url.pathname.replace('/api/v2/','');
   if(req.method()==='POST'){
@@ -27,10 +36,16 @@ const server=http.createServer((req,res)=>{
    return route.fulfill({contentType:'application/json',body:JSON.stringify({id:'pending-native',deviceId:'B',jobId:'job',state:'queued'})});
   }
   if(endpoint==='contact-sync/jobs'){
+   assert.equal(url.searchParams.get('jobId'),'job');
    reads++;return route.fulfill({contentType:'application/json',body:JSON.stringify({items:[{id:'job',state,detail:state==='denied'?'安卓未允许远程编辑':''}]})});
   }
+  const offset=Number(url.searchParams.get('offset'));
+  if(endpoint==='contacts')listReads++;
+  if(endpoint==='contacts/version')versionReads++;
+  if(cards.some(card=>endpoint==='contacts/'+card.id))detailReads++;
   const data={session:{installationId:'native',permissions:['contacts.read','contacts.write']},devices:[{deviceId:'A',name:'主机',online:true,contactsWrite:true},{deviceId:'B',name:'另一手机',online:false,contactsWrite:true}],
-   lines:[],'call-history/missed':{count:0},'voice/history':[],contacts:{items:nativeEmpty?[]:[row],next:null,syncError:scanError}};
+   lines:[],'call-history/missed':{count:0},'voice/history':[],'contacts/version':{version},contacts:{items:nativeEmpty?[]:cards.slice(offset,offset+1),next:offset+1<cards.length?offset+1:null,syncError:scanError,version}};
+  for(const card of cards)data['contacts/'+card.id]=card;
   assert.ok(endpoint in data);
   return route.fulfill({contentType:'application/json',body:JSON.stringify(data[endpoint])});
  });
@@ -75,6 +90,49 @@ const server=http.createServer((req,res)=>{
  await page.getByRole('button',{name:'刷新',exact:true}).click();
  await page.getByRole('button',{name:/安卓演示/}).waitFor();
  assert.equal(await page.getByRole('alert').count(),0);
+ const foreground=()=>page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ const checkComplete=()=>page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/contacts/version'));
+ const fullReads=listReads,checks=versionReads;
+ await Promise.all([checkComplete(),foreground()]);
+ assert.equal(listReads,fullReads,'Unchanged contacts should not be downloaded again');assert.ok(versionReads>checks);
+ const extra={...row,id:'second-card',name:'第二位',numbers:['5550197','5550110']};
+ cards=[row,extra];version='v2';
+ await foreground();
+ await page.getByRole('button',{name:'载入更多'}).click();
+ await page.getByRole('button',{name:/第二位/}).waitFor();
+ const replacement={...row,id:'replacement',name:'新第一位'};
+ cards=[replacement,extra];version='v3';
+ await foreground();
+ await page.getByRole('button',{name:/新第一位/}).waitFor();
+ assert.equal(await page.getByRole('button',{name:/安卓演示/}).count(),0);
+ assert.ok(await page.getByRole('button',{name:/第二位/}).isVisible(),'A change must preserve the loaded second page');
+ await page.getByRole('button',{name:/第二位/}).click();
+ await page.locator('.directory-poster').waitFor();
+ const openReads=listReads;
+ cards=[replacement,{...extra,name:'第二位已更新'}];version='v4';
+ await foreground();
+ await page.getByRole('heading',{name:'第二位已更新'}).waitFor();
+ assert.equal(listReads,openReads,'While detail is visible, reload only the open contact');assert.ok(detailReads>0);
+ const share=page.getByRole('button',{name:'共享姓名和号码'});
+ const stats=await share.evaluate(button=>{
+  const probe=window.shareProbe;
+  probe.inClick=true;try{button.click();button.click()}finally{probe.inClick=false}
+  return probe.calls;
+ });
+ assert.equal(stats.length,1,'Repeat clicks cannot open overlapping share sheets');
+ assert.equal(stats[0].inClick,true,'Share must be launched during the original click');
+ assert.equal(stats[0].text,['第二位已更新',...extra.numbers].join('\n'));
+ await page.evaluate(()=>window.shareProbe.finish('AbortError'));
+ await share.click();
+ assert.equal(await page.getByRole('alert').count(),0,'System cancellation is silent and immediately retryable');
+ await page.evaluate(()=>window.shareProbe.finish('NotAllowedError'));
+ await page.getByRole('alert').filter({hasText:'共享未完成'}).waitFor();
+ await share.click();
+ await page.evaluate(()=>window.shareProbe.finish());
+ assert.equal(await page.evaluate(()=>window.shareProbe.calls.length),3);
+ console.log('PASS same-click share dispatch, double tap, number order and cancel/error retry; capture-to-Web-Share stub '+stats[0].ms.toFixed(2)+' ms');
+ await page.locator('.directory-poster').getByRole('button',{name:'返回'}).click();
+ await page.getByRole('button',{name:/第二位已更新/}).waitFor();
  assert.deepEqual(errors,[]);
  console.log('PASS removed import/merge/review workflows, explicit device selection with no fallback, queued is not saved, Provider receipt gates success and denial stays visible');
  }finally{await browser.close();server.close()}

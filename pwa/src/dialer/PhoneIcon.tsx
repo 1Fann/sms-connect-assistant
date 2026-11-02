@@ -1,4 +1,4 @@
-import type {ReactNode} from 'react';
+import {useState,type ReactNode} from 'react';
 export type PhoneIconName='calls'|'person'|'keypad'|'search'|'back'|'close'|'plus'|'filter'|'phone'|'delete'|'info'|'trash'|'clock'|'settings'|'message'|'arrow'|'check'|'mute'|'speaker'|'handoff'|'hold';
 const paths:Record<PhoneIconName,ReactNode>={
  calls:<><circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="M12 5v7H7" stroke="var(--icon-cutout,#fff)" strokeWidth="1.7"/></>,
@@ -23,6 +23,13 @@ const paths:Record<PhoneIconName,ReactNode>={
 export function PhoneIcon({name,size=24}:{name:PhoneIconName,size?:number}){
  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
-export function PhoneAvatar({name,poster=false}:{name?:string,poster?:boolean}){
- return <span aria-hidden="true" className={poster?'poster-avatar':'phone-avatar'}>{name&&!/^\+?[\d\s()-]+$/.test(name)?name.slice(0,1):poster?<svg width="156" height="156" viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="33" r="19"/><path d="M12 84c2-19 17-28 38-28s36 9 38 28c-20 16-56 16-76 0"/></svg>:<PhoneIcon name="person" size={40}/>}</span>;
+export function PhoneAvatar({name,photo,poster=false,silhouette=false}:{name?:string,photo?:string,poster?:boolean,silhouette?:boolean}){
+ const [failedPhoto,setFailedPhoto]=useState<string>();
+ const mime=photo?.startsWith('/9j/')?'image/jpeg':photo?.startsWith('iVBORw0KGgo')?'image/png':undefined;
+ const showPhoto=mime&&photo&&photo!==failedPhoto&&photo.length<=21848&&/^[A-Za-z0-9+/]+={0,2}$/.test(photo);
+ const showInitial=!silhouette&&name&&!/^\+?[\d\s()-]+$/.test(name);
+ return <span aria-hidden="true" className={poster?'poster-avatar':'phone-avatar'}>
+  {showPhoto?<img className="directory-thumbnail" src={'data:'+mime+';base64,'+photo} alt="" draggable={false} onError={()=>setFailedPhoto(photo)}/>:
+   showInitial?Array.from(name)[0]:poster?<svg width="156" height="156" viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="32" r="19"/><path d="M12 84c2-19 17-28 38-28s36 9 38 28c-20 16-56 16-76 0"/></svg>:<PhoneIcon name="person" size={40}/>}
+ </span>;
 }

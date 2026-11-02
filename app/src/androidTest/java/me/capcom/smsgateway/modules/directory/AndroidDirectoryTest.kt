@@ -48,6 +48,16 @@ class AndroidDirectoryTest {
   assertEquals("Second phone",s.resolveName(phone){it=="B"})
   assertEquals(a.getString("id"),cards{it=="A"}.first{it.getString("nativeContactId")=="5"}.getString("id"))
  }
+ @Test fun aggregatedThumbnailIsScopedAndReturnedOnce(){
+  val photo="iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+  val photographed=event(raw="2").apply{getJSONObject("record").put("photo",photo)}
+  s.sync("A",packet(listOf(event(),photographed)))
+  s.sync("B",packet(listOf(event())))
+  val a=cards{it=="A"}.single()
+  assertEquals(photo,a.getString("photo"))
+  assertTrue(a.getJSONArray("sources").objects().none{it.has("photo")})
+  assertFalse(cards{it=="B"}.single().has("photo"))
+ }
  @Test fun nativeEditsAreSourceBoundAndOnlyProviderSnapshotsChangeTheReadModel(){
   s.sync("A",packet(listOf(event())))
   val card=cards().single();val request=change(card)

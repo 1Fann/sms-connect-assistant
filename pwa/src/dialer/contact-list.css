@@ -1,0 +1,183 @@
+/* Contact list measurements are scoped to the directory, including its own scroll pane. */
+.phone-toolbar.directory-toolbar {
+  /* The scroll pane already pads its top by the safe-area inset and 4px. */
+  top: -4px;
+  height: 44px;
+  margin: -4px -14px 12px;
+  padding: 0 16px;
+  background: color-mix(in srgb, var(--bg) 93%, transparent);
+}
+
+.directory-toolbar::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 100%;
+  height: env(safe-area-inset-top);
+  background: var(--bg);
+  pointer-events: none;
+}
+
+.directory-toolbar .glass-circle {
+  width: 44px;
+  height: 44px;
+  padding: 9px;
+  border: .5px solid var(--line);
+  background: color-mix(in srgb, var(--glass) 94%, var(--bg));
+  box-shadow: inset 0 1px 1px #ffffff60, 0 1px 4px #00000008;
+}
+
+.directory-toolbar h1 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.contact-groups.directory-groups {
+  margin: 0 2px;
+}
+
+.contact-groups.directory-groups > section {
+  scroll-margin-top: calc(env(safe-area-inset-top) + 44px);
+}
+
+.contact-groups.directory-groups > section > h2 {
+  position: sticky;
+  top: 40px;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  height: 34px;
+  margin: 0;
+  padding: 0 0 6px;
+  border: 0;
+  border-bottom: .5px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.directory-groups .contact-list-row {
+  position: relative;
+  width: 100%;
+  min-height: 74px;
+  gap: 16px;
+  justify-content: flex-start;
+  padding: 6px 10px 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.directory-groups .contact-list-row:not(:last-child)::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 60px;
+  height: .5px;
+  background: var(--line);
+  content: "";
+}
+
+.directory-groups .contact-list-row:active {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  filter: none;
+}
+
+.directory-groups .contact-list-row .phone-avatar {
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  background: linear-gradient(165deg, #a2bfd2, #899bc0 45%, #6775a6);
+  color: #fff;
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.directory-groups .phone-avatar > svg {
+  width: 45px;
+  height: 45px;
+  color: transparent;
+  --icon-cutout: #fff;
+}
+
+.directory-groups .contact-list-name {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  text-align: start;
+}
+
+.directory-groups .contact-list-name b,
+.directory-groups .contact-list-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-groups .contact-list-name b {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.directory-groups .contact-list-name small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 17px;
+}
+
+.directory-index {
+  --index-step: min(13.4px, calc((var(--height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 140px) / 27));
+  position: fixed;
+  top: calc(50% + (env(safe-area-inset-top) - env(safe-area-inset-bottom)) / 2);
+  right: max(env(safe-area-inset-right), calc((100% - 600px) / 2));
+  z-index: 9;
+  display: grid;
+  width: 26px;
+  padding-left: 8px;
+  transform: translateY(-50%);
+  color: var(--accent);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.directory-index > button,
+.directory-index > span {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  height: var(--index-step);
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: 650 min(10.5px, var(--index-step)) / 1 -apple-system, BlinkMacSystemFont, sans-serif;
+  touch-action: none;
+}
+
+.phone-app.searching .directory-index {
+  display: none;
+}
+
+.directory-paging {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.directory-paging button {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .directory-toolbar .glass-circle {
+    box-shadow: inset 0 1px 1px #ffffff18;
+  }
+}

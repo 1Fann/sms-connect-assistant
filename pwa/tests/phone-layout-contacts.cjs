@@ -16,7 +16,8 @@ const server=http.createServer((req,res)=>{
  const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});const writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
 
- fs.mkdirSync(path.resolve(__dirname,'../../.work/dev12-ui'),{recursive:true});
+ const screenshotDir=path.resolve(__dirname,'../../.work/contacts-ui');
+ fs.mkdirSync(screenshotDir,{recursive:true});
  const contacts=Array.from({length:40},(_,i)=>({id:'contact-'+i,name:'合成联系人 '+String(i).padStart(2,'0'),numbers:['55502'+String(i).padStart(2,'0')],deviceId:'server',primaryRawId:'raw-'+i,sources:[{deviceId:'server',contactId:String(i+1),rawId:'raw-'+i,revision:'raw-v3',name:'合成联系人 '+String(i).padStart(2,'0'),numbers:['55502'+String(i).padStart(2,'0')],readOnly:false}],revision:3,favorite:i===0,conflict:false}));
  const create=[],edit=[];let canWrite=true;
  const record={id:'call',name:'',number:'5550100',deviceId:'server',slot:1,type:'outgoing',date:1720000000000,duration:40};
@@ -85,7 +86,7 @@ const server=http.createServer((req,res)=>{
  await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(create.length,0);
  await page.getByRole('button',{name:'新建联系人',exact:true}).click();
  await page.getByLabel('姓名',{exact:true}).fill('新建演示');
- await page.waitForTimeout(300);await page.screenshot({path:path.resolve(__dirname,'../../.work/dev12-ui/create-contact.png')});
+ await page.screenshot({path:path.join(screenshotDir,'create-contact.png'),animations:'disabled'});
  await page.getByRole('button',{name:'完成',exact:true}).click();
  await page.getByRole('alert').filter({hasText:'可重试'}).waitFor();
  await page.getByRole('button',{name:'重试',exact:true}).click();
@@ -95,7 +96,7 @@ const server=http.createServer((req,res)=>{
  await page.locator('.call-contact-editor').getByRole('button',{name:/合成联系人 00/}).click();
  await page.getByRole('button',{name:'完成',exact:true}).click();
  await page.getByRole('alert').filter({hasText:'联系人已改变'}).waitFor();
- await page.screenshot({path:path.resolve(__dirname,'../../.work/dev12-ui/append-contact.png')});
+ await page.screenshot({path:path.join(screenshotDir,'append-contact.png'),animations:'disabled'});
  assert.equal(create.length,2);assert.equal(edit.length,1);assert.equal(await page.locator('.contact-sheet').evaluate(el=>el.inert),true);
  await page.locator('.call-contact-editor').getByRole('button',{name:'返回',exact:true}).click();
  await page.locator('.call-contact-editor').getByRole('button',{name:/合成联系人 00/}).click();

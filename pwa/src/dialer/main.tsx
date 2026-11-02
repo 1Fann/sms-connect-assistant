@@ -32,7 +32,12 @@ function App(){
  },[waiting]);
  useEffect(()=>{if(!session)return;let active=true;const load=async()=>{if(document.hidden)return;try{const [ds,ls]=await Promise.all([api<Device[]>('devices'),api<Line[]>('lines')]);if(active){setDevices(ds);setLines(ls)}}catch(e){if(active){if(e instanceof PhoneError&&e.status===401)setSession(null);setMessage(err(e))}}};void load();const t=setInterval(load,8000);return()=>{active=false;clearInterval(t)}},[session]);
  useEffect(()=>{const f=()=>{if(location.hash==='#missed')setTab('最近通话')};window.addEventListener('hashchange',f);return()=>window.removeEventListener('hashchange',f)},[]);
- function switchTab(next:string){setSearching(false);setQuery('');setTab(next)}
+ const [directoryVisit,setDirectoryVisit]=useState(0);
+ const inDirectory=tab==='通讯录'||tab==='个人收藏';
+ function switchTab(next:string){
+  if(inDirectory&&next===tab)setDirectoryVisit(value=>value+1);
+  setSearching(false);setQuery('');setTab(next);
+ }
  function dial(n:string,id=''){setNumber(n);if(id)hint(v=>({id,seq:v.seq+1}));switchTab('拨号键盘')}
  const sorted=[...lines].sort((a,b)=>(order.indexOf(a.lineId)+1||99999)-(order.indexOf(b.lineId)+1||99999));
  const missed=useMissedBadge(session?.installationId,session?.permissions.includes('calls.read')===true);
@@ -42,7 +47,7 @@ function App(){
  return <><main id="phone-app" className={'phone-app'+(searching?' searching':'')+(tab==='设置'?' settings-page':'')} key={session.installationId}>{message&&<p role="status">{message}</p>}
    <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint} openSettings={()=>switchTab('设置')}/></div>
    {tab==='最近通话'&&(can('calls.read')?<Recent canAddContacts={can('contacts.read')&&can('contacts.write')} devices={devices} dial={dial} installation={session.installationId} searching={searching} query={query} settings={()=>switchTab('设置')} contacts={()=>switchTab('个人收藏')} onSeen={missed.viewed}/>:<p>此安装未获通话记录授权</p>)}
-   {(tab==='通讯录'||tab==='个人收藏')&&(can('contacts.read')?<Directory key={tab} devices={devices} lines={sorted} canEdit={can('contacts.write')} favorites={tab==='个人收藏'} searchQuery={query} settings={()=>switchTab('设置')} allContacts={()=>switchTab(tab==='个人收藏'?'通讯录':'个人收藏')} dial={dial}/>:<p>此安装未获通讯录读取授权</p>)}
+   {(tab==='通讯录'||tab==='个人收藏')&&(can('contacts.read')?<Directory key={tab+directoryVisit} devices={devices} lines={sorted} canEdit={can('contacts.write')} favorites={tab==='个人收藏'} searchQuery={query} settings={()=>switchTab('设置')} allContacts={()=>switchTab(tab==='个人收藏'?'通讯录':'个人收藏')} dial={dial}/>:<p>此安装未获通讯录读取授权</p>)}
    {tab==='设置'&&<><header className="phone-toolbar"><button className="glass-circle" aria-label="返回通话" onClick={()=>switchTab('最近通话')}><PhoneIcon name="back"/></button><h1>互联设置</h1><span className="toolbar-spacer"/></header><h2>设备与线路</h2>{devices.map(d=><section key={d.deviceId} className="card"><b>{d.name}</b><small>{d.online?'在线':'离线'}</small>{sorted.filter(l=>l.deviceId===d.deviceId).map(l=><div className="row" key={l.lineId}>{l.name}<span>{!l.confirmed?'待确认':l.online?'可用':'离线'}</span><button onClick={()=>{const v=[l.lineId,...sorted.map(x=>x.lineId).filter(id=>id!==l.lineId)];setOrder(v);localStorage.setItem('phone.order',JSON.stringify(v))}}>排在首位</button></div>)}</section>)}
    <p className="hint">网页拨号会打开 Groundwire，通话全程由 Groundwire 承载。</p>
    <h2>通知</h2><button disabled={!can('calls.read')} onClick={()=>void enablePush().then(()=>{setMessage('已开启未接来电提醒及主屏幕角标');void missed.refresh()}).catch(e=>setMessage(err(e)))}>开启未接来电提醒</button>
@@ -51,7 +56,7 @@ function App(){
  </main><div className={'phone-dock'+(searching?' search-open':'')}>
  {searching?<div className="dock-search"><PhoneIcon name="search" size={21}/><input autoFocus aria-label="搜索通话或联系人" placeholder="搜索" value={query} onChange={e=>setQuery(e.target.value)} type="search"/>{query&&<button aria-label="清空搜索" onClick={()=>setQuery('')}><PhoneIcon name="close" size={15}/></button>}</div>:
  <nav aria-label="电话导航">{([{id:'最近通话',label:'通话',icon:'calls'},{id:'通讯录',label:'联系人',icon:'person'},{id:'拨号键盘',label:'拨号键盘',icon:'keypad'}] as const).map(t=><button key={t.id} aria-current={(t.id===tab||t.id==='通讯录'&&tab==='个人收藏')?'page':undefined} onClick={()=>switchTab(t.id)}><span className="dock-icon"><PhoneIcon name={t.icon} size={25}/>{t.id==='最近通话'&&missed.count>0&&<i className="missed-badge" aria-label={missed.count+' 个未查看来电'}>{missed.count>99?'99+':missed.count}</i>}</span><span>{t.label}</span></button>)}</nav>}
- <button className="dock-search-toggle glass-circle" aria-label={searching?'取消搜索':'搜索'} onClick={()=>{if(searching){setSearching(false);setQuery('')}else{if(tab==='拨号键盘'||tab==='设置')setTab('最近通话');setSearching(true)}}}><PhoneIcon name={searching?'close':'search'} size={25}/></button>
+ <button className="dock-search-toggle glass-circle" aria-label={searching?'取消搜索':'搜索'} onClick={()=>{if(inDirectory)setDirectoryVisit(value=>value+1);if(searching){setSearching(false);setQuery('')}else{if(tab==='拨号键盘'||tab==='设置')setTab('最近通话');setSearching(true)}}}><PhoneIcon name={searching?'close':'search'} size={25}/></button>
  </div></>;
 }
 if('serviceWorker' in navigator)void navigator.serviceWorker.register('/phone/sw.js',{scope:'/phone/'}).catch(()=>{});

@@ -20,7 +20,7 @@ export type Session={installationId:string,permissions:string[]};
 export type Device={deviceId:string,name:string,online:boolean,contactsWrite?:boolean};
 export type Line={lineId:string,deviceId:string,name:string,slot:number,lineOnline?:boolean,confirmed:boolean,online:boolean};
 export type ContactSource={deviceId:string,rawId:string,contactId:string,revision:string|number,name:string,numbers:string[],readOnly:boolean};
-export type Contact={id:string,name:string,numbers:string[],revision:number,favorite:boolean,conflict:boolean,sources:ContactSource[],deviceId?:string,nativeContactId?:string,primaryRawId?:string};
+export type Contact={id:string,name:string,numbers:string[],revision:number,favorite:boolean,conflict:boolean,sources:ContactSource[],deviceId?:string,nativeContactId?:string,primaryRawId?:string,photo?:string};
 export type CallRecord={id:string,deviceId?:string,number:string,name?:string,date:number,duration:number,type:string,accountId?:string,slot?:number|null};
 export type PbxCall={id:string,lineId:string,number:string,state:string,direction:string,device?:string,slot?:number|null,created:number,answeredAt?:number,endedAt?:number,reason?:string,target?:string};
 export const err=(e:unknown)=>e instanceof Error?e.message:'操作未完成';

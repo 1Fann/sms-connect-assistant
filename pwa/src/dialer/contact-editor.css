@@ -1,0 +1,343 @@
+/* Both surfaces share the phone viewport geometry. Only the field list scrolls. */
+.call-contact-editor.ios-editor {
+  --editor-page: #ededf5;
+  --editor-fill: #fff;
+  --editor-pill: #dedee7;
+  --editor-muted: #74747e;
+  --editor-rule: rgba(60,60,67,.16);
+  --editor-side: clamp(14px,4vw,20px);
+  display: flex;
+  flex-direction: column;
+  margin-inline: auto;
+  width: min(100%,600px);
+  padding: 0;
+  border: none;
+  color: var(--ink);
+  background: var(--editor-page);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.ios-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 68;
+  background: rgb(29 31 40 / 29%);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+.call-contact-editor.ios-editor-sheet {
+  --sheet-top: max(12px,env(safe-area-inset-top,0px));
+  position: fixed;
+  inset: calc(var(--viewport-top,0px) + var(--sheet-top)) 0 auto;
+  height: calc(var(--height,100dvh) - var(--sheet-top) - var(--phone-keyboard,0px));
+  max-height: var(--height,100dvh);
+  z-index: 70;
+  border-radius: 30px 30px 0 0;
+  box-shadow: 0 -4px 25px rgb(20 22 40 / 6%);
+  animation: ios-editor-sheet-in .28s cubic-bezier(.2,.78,.28,1);
+}
+
+.call-contact-editor.ios-editor-edit {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 40;
+  height: calc(100% - var(--phone-keyboard,0px));
+  padding-top: env(safe-area-inset-top,0px);
+  animation: ios-editor-page-in .22s ease-out;
+}
+
+.ios-editor-grabber {
+  display: block;
+  width: 35px;
+  height: 4px;
+  margin: 6px auto 0;
+  background-color: rgb(70 70 79 / 30%);
+  border-radius: 20px;
+  flex: none;
+}
+
+.ios-editor-toolbar {
+  position: relative;
+  flex: none;
+  height: 49px;
+  margin-inline: var(--editor-side);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ios-editor-toolbar h1 {
+  position: absolute;
+  left: 62px;
+  right: 62px;
+  text-align: center;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -.015em;
+  pointer-events: none;
+}
+
+.ios-editor button.ios-editor-circle {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  background: color-mix(in srgb,var(--editor-fill) 78%,transparent);
+  border: 1px solid color-mix(in srgb,var(--editor-rule) 65%,transparent);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 65%);
+}
+.ios-editor button.ios-editor-save {color: white; background: var(--accent)}
+.ios-editor button.ios-editor-save:disabled {color: #818185; background: var(--editor-pill); opacity: 1}
+.ios-editor button.ios-editor-save.is-submitted {width: auto; min-width: 54px; padding: 0 12px; font-size: 14px; border-radius: 23px}
+
+.ios-editor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 0 var(--editor-side) calc(env(safe-area-inset-bottom,0px) + 22px);
+  scroll-padding-block: 12px;
+}
+.ios-editor-scroll::-webkit-scrollbar {display: none}
+.ios-editor-edit .ios-editor-scroll {padding-bottom: calc(env(safe-area-inset-bottom,0px) + 92px)}
+html[data-keyboard-open=true] .ios-editor-edit .ios-editor-scroll {padding-bottom: 16px}
+html[data-keyboard-open=true] #root:has(> .ios-editor-edit) .phone-dock {visibility: hidden}
+
+.ios-editor-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0 19px;
+}
+
+.ios-editor-identity .poster-avatar {
+  display: grid;
+  place-items: center;
+  width: clamp(108px,43.5vw,174px);
+  height: auto;
+  aspect-ratio: 1;
+  overflow: hidden;
+  margin: 0;
+  border-radius: 50%;
+  background: linear-gradient(168deg,#a2bed3 2%,#859bc2 44%,#656fa8);
+  color: #fff;
+  box-shadow: none;
+}
+.ios-editor-identity .poster-avatar svg {width: 82%; height: 82%}
+.ios-editor-identity .poster-avatar img {width: 100%; height: 100%; object-fit: cover}
+
+.ios-editor .ios-editor-origin,
+.ios-editor label.ios-editor-destination {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 39px;
+  max-width: min(90%,320px);
+  margin: 0;
+  padding: 0 17px;
+  color: var(--ink);
+  background: var(--editor-pill);
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ios-editor-destination > span:first-child {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.ios-editor-destination .ios-editor-chevron {color: var(--editor-muted); margin-top: -3px}
+.ios-editor label.ios-editor-destination > select {position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0}
+.ios-editor-destination:focus-within {outline: 2px solid var(--accent); outline-offset: 2px}
+.ios-editor .ios-editor-origin {color: var(--editor-muted); font-weight: 500}
+.ios-editor .ios-editor-group {
+  display: block;
+  margin: 0 0 14px;
+  padding: 0;
+  border: none;
+  border-radius: 24px;
+  background: var(--editor-fill);
+  overflow: hidden;
+  font-size: 17px;
+}
+.ios-editor label.ios-editor-name,
+.ios-editor label.ios-editor-source,
+.ios-editor .ios-append-number {
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  min-height: 51px;
+  gap: 12px;
+}
+.ios-editor-name > span,.ios-editor-source > span,.ios-append-number > span {
+  min-width: 47px;
+  color: var(--editor-muted);
+  font-size: 15px;
+  flex: none;
+}
+.ios-editor .ios-editor-group input,
+.ios-editor .ios-editor-source select,
+.ios-editor .ios-picker-search input {
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 8px 0;
+  min-width: 0;
+  background: transparent;
+  box-shadow: none;
+  caret-color: var(--accent);
+  outline: 0;
+}
+.ios-editor .ios-editor-group input::placeholder,.ios-editor .ios-picker-search input::placeholder {color: var(--editor-muted)}
+.ios-editor .ios-editor-group input:focus-visible,.ios-editor .ios-picker-search input:focus-visible {outline: 0}
+.ios-editor .ios-editor-group input[readonly] {color: var(--editor-muted)}
+.ios-editor .ios-editor-source select { flex: 1; font-size: 16px; color: var(--accent) }
+
+.ios-phone-row, .ios-editor .ios-phone-add {
+  display: flex;
+  align-items: center;
+  min-height: 49px;
+  position: relative;
+}
+.ios-phone-row::after {
+  content: "";
+  position: absolute;
+  height: .5px;
+  background: var(--editor-rule);
+  left: 54px;
+  right: 0;
+  bottom: 0;
+}
+.ios-phone-row .ios-phone-remove, .ios-editor .ios-phone-add {
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+.ios-phone-row .ios-phone-remove {
+  flex: none;
+  width: 54px;
+  height: 49px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.ios-phone-remove span, .ios-phone-add span {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  line-height: 17px;
+  border-radius: 50%;
+  color: white;
+  font-size: 17px;
+  font-weight: 500;
+  background: #ff3b30;
+}
+.ios-phone-label {
+  flex: none;
+  padding: 5px 12px 5px 0;
+  margin-right: 12px;
+  color: var(--editor-muted);
+  border-right: .5px solid var(--editor-rule);
+  font-size: 14px;
+}
+.ios-editor .ios-phone-row input {flex: 1; color: #0073cb; padding-right: 12px; font-variant-numeric: tabular-nums}
+.ios-editor .ios-phone-delete {
+  flex: none;
+  height: 49px;
+  min-height: 49px;
+  color: #fff;
+  background: #ff3b30;
+  border-radius: 0;
+  font-size: 15px;
+}
+.ios-editor .ios-phone-add {
+  width: 100%;
+  gap: 18px;
+  padding: 0 18px;
+  font-size: 16px;
+  text-align: left;
+  color: var(--ink);
+}
+.ios-phone-add span {background: #34c759}
+.ios-editor-caption, .ios-editor-scroll > p[role=status], .ios-editor-scroll > p[role=alert] {
+  margin: 10px 6px;
+  color: var(--editor-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ios-editor .ios-editor-reload {margin: 6px; padding-inline: 0}
+.ios-editor .ios-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  border-radius: 12px;
+  margin: 12px 0 0;
+  padding: 0 12px;
+  background-color: var(--editor-pill);
+  color: var(--editor-muted);
+}
+.ios-editor .ios-picker-search input {width: 100%}
+.ios-picker-group {margin: 12px 0; border-radius: 18px; overflow: hidden; background: var(--editor-fill)}
+.ios-picker-group h2 {font-size: 15px; color: var(--editor-muted); margin: 0; padding: 9px 14px 6px}
+.ios-editor .ios-picker-contact {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 14px;
+  min-height: 57px;
+  text-align: left;
+  border-radius: 0;
+  background: var(--editor-fill);
+  color: var(--ink);
+}
+.ios-picker-contact + .ios-picker-contact {border-top: .5px solid var(--editor-rule)}
+.ios-picker-contact > span:last-child {display: grid; gap: 2px; min-width: 0}
+.ios-picker-contact strong {font-weight: 600; overflow-wrap: anywhere}
+.ios-picker-contact small {color: var(--editor-muted); overflow-wrap: anywhere}
+.ios-editor .ios-append-fields h2, .ios-editor .ios-append-fields p {margin: 0; padding: 12px 18px; font-size: 17px}
+.ios-append-fields p, .ios-append-number strong {color: var(--accent); font-weight: 450; overflow-wrap: anywhere}
+.ios-append-fields p {border-top: .5px solid var(--editor-rule)}
+
+@keyframes ios-editor-sheet-in {
+  from {transform: translateY(70px); opacity: .65}
+  to {transform: translateY(0); opacity: 1}
+}
+@keyframes ios-editor-page-in {
+  from {transform: translateY(12px); opacity: .8}
+  to {transform: translateY(0); opacity: 1}
+}
+@media (max-height: 680px) {
+  .ios-editor-identity .poster-avatar {width: 126px}
+  .ios-editor-identity {padding: 3px 0 14px; gap: 8px}
+  .ios-editor .ios-editor-origin, .ios-editor label.ios-editor-destination {min-height: 33px}
+}
+@media (max-height: 500px) {
+  .ios-editor-identity .poster-avatar {width: 78px}
+}
+@media (prefers-reduced-motion: reduce) {
+  .call-contact-editor.ios-editor {animation: none}
+}
+@media (prefers-color-scheme: dark) {
+  .call-contact-editor.ios-editor {--editor-page: #17171d; --editor-fill: #28282f; --editor-pill: #35353d; --editor-muted: #acacb4; --editor-rule: rgb(255 255 255 / 15%)}
+  .ios-editor button.ios-editor-circle {box-shadow: inset 0 1px 1px rgb(255 255 255 / 13%)}
+  .ios-editor .ios-phone-row input {color: #62b8ff}
+}

@@ -11,11 +11,16 @@ internal class AndroidDirectory(private val service:DirectoryService) {
  private fun id(device:String,contact:String)=UUID.nameUUIDFromBytes(("android-contact-v1\u0000"+device+"\u0000"+contact).toByteArray()).toString()
  fun cards(allowed:(String)->Boolean):List<JSONObject>{
   val groups=linkedMapOf<Pair<String,String>,MutableList<JSONObject>>()
+  val thumbnails = mutableMapOf<Pair<String,String>,String>()
   db.rows("SELECT s.device,s.raw,s.payload FROM sources s JOIN grants g ON g.device=s.device WHERE s.deleted=0 AND g.contacts=1 ORDER BY s.device,s.raw"){
    Triple(it.getString(0),it.getString(1),it.getString(2))
   }.forEach { (device,raw,json)->
    if(!allowed(device))return@forEach
    val payload=JSONObject(json)
+   val photo = payload.optString("photo")
+   if (photo.length in 1..21848 && (photo.startsWith("/9j/") || photo.startsWith("iVBORw0KGgo"))) {
+    thumbnails[device to raw] = photo
+   }
    val aggregate=payload.optString("contactId").takeIf{it.toLongOrNull()?.let{v->v>0}==true}?:raw
    groups.getOrPut(device to aggregate){arrayListOf()}.add(JSONObject().put("deviceId",device).put("rawId",raw)
     .put("contactId",aggregate).put("revision",payload.getString("revision")).put("name",payload.optString("name"))
@@ -30,7 +35,9 @@ internal class AndroidDirectory(private val service:DirectoryService) {
    val primary=sources.firstOrNull{it.getString("rawId")==newest.optString("nameRawId")}
     ?:sources.firstOrNull{!it.getBoolean("readOnly")}?:sources.first()
    val snapshot=JSONArray(sources.map{JSONObject(it.toString()).apply{remove("observedAt")}}).toString()
-   JSONObject().put("id",cardId).put("deviceId",identity.first).put("nativeContactId",identity.second)
+   val thumbnail = thumbnails[identity.first to primary.getString("rawId")]
+    ?: sources.firstNotNullOfOrNull { thumbnails[identity.first to it.getString("rawId")] }
+   JSONObject().put("photo",thumbnail).put("id",cardId).put("deviceId",identity.first).put("nativeContactId",identity.second)
     .put("name",newest.getString("displayName")).put("numbers",JSONArray(sources.flatMap{it.getJSONArray("numbers").strings()}.distinct()))
     .put("sources",JSONArray(sources)).put("primaryRawId",primary.getString("rawId"))
     .put("revision",PrivateStore.hash(snapshot).take(12).toLong(16)).put("favorite",cardId in favorites).put("conflict",false)

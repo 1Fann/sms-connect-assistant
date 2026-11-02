@@ -4,7 +4,7 @@
 
 CommLink uses one Android host and independently paired phones to provide SMS, contacts, SIM lines and call history to two iPhone Home Screen apps. Interconnected Messages keeps the original SMS installation. Interconnected Phone connects to a separately authorised HTTPS listener. Optional voice requires a verified cellular Voice SIP Agent, an Asterisk PBX and Groundwire.
 
-**Development version 0.9.0-dev14 (37)** retains the application ID and signing chain of SMS Connect Assistant 0.8.9 (23). The stable download predates this integration. See the [upgrade and validation guide](docs/COMMLINK-UPGRADE.md), [multi-device guide](docs/MULTI_PHONE.md), [directory guide](docs/COMMLINK-DIRECTORY.md), and [voice guide](docs/VOICE.en.md). The UI is Chinese. This project builds on [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway). See [LICENSE](LICENSE).
+**Development version 0.9.0-dev15 (38)** retains the application ID and signing chain of SMS Connect Assistant 0.8.9 (23). The stable download predates this integration. See the [upgrade and validation guide](docs/COMMLINK-UPGRADE.md), [multi-device guide](docs/MULTI_PHONE.md), [directory guide](docs/COMMLINK-DIRECTORY.md), and [voice guide](docs/VOICE.en.md). The UI is Chinese. This project builds on [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway). See [LICENSE](LICENSE).
 
 [Download APK](https://github.com/1Fann/sms-connect-assistant/releases) · [Installation](docs/INSTALL.en.md) · [Security and privacy](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 

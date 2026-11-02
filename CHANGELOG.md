@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev15 · 互联电话联系人界面
+
+- 依照用户提供的录屏调整联系人列表、详情和编辑页。字母索引支持拖动，详情支持选择号码发短信或拨号，编辑页逐行增删电话。
+- Restyled the Phone directory, contact card and editor against the supplied iPhone recording. Existing Android thumbnails appear on supported cards. See the [release notes](docs/releases/0.9.0-dev15.md).
+
 ## 0.9.0-dev14 · 通讯录读取兼容修复
 
 - 兼容拒绝 Data.IS_READ_ONLY 投影的通讯录 Provider，保留原始账号只读、版本及批处理行数保护。

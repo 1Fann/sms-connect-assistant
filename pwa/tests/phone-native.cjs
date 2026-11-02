@@ -106,6 +106,8 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  assert.equal(Math.round(568-dockBounds.y-dockBounds.height),6,'Compact dock must sit 6px from the viewport bottom');
  assert.ok(await page.locator('#phone-app').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Compact dialer must not scroll');
  await page.setViewportSize({width:390,height:844});
+ // Viewport geometry is applied on the next animation frame after the resize event.
+ await page.waitForFunction(()=>document.querySelector('#root').clientHeight===innerHeight,undefined,{timeout:2000});
  const normalDock=await page.locator('.phone-dock').boundingBox();
  assert.equal(Math.round(844-normalDock.y-normalDock.height),6,'Normal dock must sit lower too');
  assert.ok(await page.locator('#phone-app').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'Normal dialer must not scroll');

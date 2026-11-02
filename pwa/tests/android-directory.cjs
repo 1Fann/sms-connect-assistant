@@ -41,7 +41,11 @@ const server=http.createServer((req,res)=>{
  assert.equal(await page.getByRole('button',{name:'导入 iPhone 联系人',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'最近删除',exact:true}).count(),0);
  await page.getByRole('button',{name:'新建联系人',exact:true}).click();
+ const sheet=page.getByRole('dialog',{name:'新建联系人',exact:true});
+ assert.equal(await sheet.getByLabel('姓名',{exact:true}).evaluate(input=>input===document.activeElement),true,'New contact should focus its name field');
  await page.getByLabel('姓名',{exact:true}).fill('新联系人');
+ await page.getByRole('button',{name:'添加电话',exact:true}).click();
+ assert.equal(await sheet.getByLabel('联系人电话号码',{exact:true}).evaluate(input=>input===document.activeElement),true,'Adding a number focuses the new telephone row');
  await page.getByLabel('联系人电话号码').fill('5550300');
  assert.equal(await page.getByLabel('保存到安卓手机').inputValue(),'');
  assert.ok(await page.getByRole('button',{name:'完成',exact:true}).isDisabled());

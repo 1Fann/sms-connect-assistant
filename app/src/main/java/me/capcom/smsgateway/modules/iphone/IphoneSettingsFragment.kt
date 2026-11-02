@@ -84,7 +84,7 @@ class IphoneSettingsFragment : me.capcom.smsgateway.ui.settings.BasePreferenceFr
         val nodes=PeerHub.get(requireContext()).devices()
         val features=if(phone) listOf("contacts.read","contacts.write","calls.read","calls.dial") else listOf("sms.read","sms.send","contacts.read")
         val keys=features+nodes.map { "device:"+it["deviceId"].toString() }
-        val names=if(phone) listOf("读取通讯录","编辑指定来源联系人","读取通话记录","允许付费拨号及接续") else listOf("读取短信","发送短信","搜索授权设备通讯录")
+        val names=if(phone) listOf("读取通讯录","编辑助手联系人及指定来源","读取通话记录","允许付费拨号及接续") else listOf("读取短信","发送短信","搜索授权设备通讯录")
         val choices=(names+nodes.map { "允许设备 · "+it["name"].toString() }).toTypedArray()
         val selected=BooleanArray(keys.size) { i->previous?.contains(keys[i]) ?: (keys[i].endsWith(".read")||keys[i]=="device:server") }
         AlertDialog.Builder(requireContext()).setTitle(if(phone)"互联电话授权" else "互联信息授权")

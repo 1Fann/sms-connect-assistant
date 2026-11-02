@@ -9,7 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : SQLiteOpenHelper(ctx, name, null, 2) {
+internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : SQLiteOpenHelper(ctx, name, null, 3) {
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
 
     // Separate directory schema. None of the four SMS
@@ -52,14 +52,19 @@ internal class DirectoryDb(ctx: Context, name:String="commlink-directory.db") : 
         db.execSQL("CREATE TABLE applied(link TEXT NOT NULL,id TEXT NOT NULL,result TEXT NOT NULL,acked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(link,id))")
         db.execSQL("CREATE TABLE attempts(link TEXT NOT NULL,id TEXT NOT NULL, PRIMARY KEY(link,id))")
         createCallSeen(db)
+        createImports(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion==1 && newVersion==2){"Unsupported CommLink directory schema upgrade"}
-        createCallSeen(db)
+        check(oldVersion in 1..2 && newVersion==3){"Unsupported CommLink directory schema upgrade"}
+        if(oldVersion<2)createCallSeen(db)
+        createImports(db)
     }
     private fun createCallSeen(db:SQLiteDatabase){
         db.execSQL("CREATE TABLE call_seen(installation TEXT NOT NULL,device TEXT NOT NULL,raw TEXT NOT NULL,date INTEGER NOT NULL,PRIMARY KEY(installation,device,raw,date))")
+    }
+    private fun createImports(db:SQLiteDatabase){
+        db.execSQL("CREATE TABLE contact_imports(id TEXT PRIMARY KEY,owner TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,created INTEGER NOT NULL)")
     }
 }
 

@@ -4,10 +4,12 @@ import {PhoneIcon,PhoneAvatar} from './PhoneIcon';
 import {DetailSheet} from './DetailSheet';
 import {formatPhone} from '../phone';
 import {sectionContacts} from './contactSections';
+import {ContactImport} from './ContactImport';
 type Target={deviceId:string,rawId?:string,revision?:string|number,action:'create'|'update'|'delete'};
 type Job={id:string,deviceId:string,action:string,state:string,detail:string};
 const states:Record<string,string>={queued:'等待目标设备',done:'已写入',conflict:'来源有冲突',denied:'目标拒绝',failed:'失败',revoked:'设备已撤销'};
 export function Directory({devices,canEdit,favorites,dial,lines,searchQuery,settings,allContacts}:{devices:Device[],canEdit:boolean,favorites:boolean,dial:(n:string,id?:string)=>void,lines:Line[],searchQuery?:string,settings:()=>void,allContacts:()=>void}){
+ const [importing,setImporting]=useState(false),[importNotice,setImportNotice]=useState('');
  useEffect(()=>{if(searchQuery!==undefined){setQuery(searchQuery);setOffset(0)}},[searchQuery]);
  const [rows,setRows]=useState<Contact[]>([]),[selected,setSelected]=useState<Contact|null>(null),[query,setQuery]=useState('');
  const [editing,setEditing]=useState(false),[name,setName]=useState(''),[numbers,setNumbers]=useState(''),[targets,setTargets]=useState<Target[]>([]);
@@ -58,6 +60,7 @@ export function Directory({devices,canEdit,favorites,dial,lines,searchQuery,sett
    catch(e){setError(err(e))}finally{lock.current=false;setBusy(false)}
  }
  const hint=error&&<p role="alert">{error}</p>;
+ if(importing)return <ContactImport canImport={canEdit} onClose={()=>setImporting(false)} onDone={message=>{setImporting(false);setImportNotice(message);setError('');reload()}}/>;
  if(editing)return <section className="contact-editor"><button onClick={()=>{setEditing(false);setTargets([])}}>取消</button><h1>{selected?'编辑联系人':'新建联系人'}</h1>
    <label>姓名或备注<input value={name} maxLength={200} onChange={e=>setName(e.target.value)}/></label>
    <label>电话号码（每行一个）<textarea value={numbers} rows={4} onChange={e=>setNumbers(e.target.value)}/></label>
@@ -78,14 +81,15 @@ export function Directory({devices,canEdit,favorites,dial,lines,searchQuery,sett
    {selected.numbers.map(n=><button className="row" key={n} onClick={()=>dial(n,defaultLine)}>{n}<span>拨号 ›</span></button>)}
    <label>首选拨出线路<select value={defaultLine} onChange={e=>{setDefaultLine(e.target.value);localStorage.setItem('phone.line.'+selected.id,e.target.value)}}><option value="">每次选择</option>{lines.map(l=><option key={l.lineId} value={l.lineId}>{l.name}</option>)}</select></label>
    {canEdit&&(trash?<button disabled={busy} onClick={()=>void save('restore')}>恢复统一联系人</button>:<div className="controls"><button onClick={()=>edit(selected)}>编辑</button><button disabled={busy} onClick={()=>void save('edit',{favorite:!selected.favorite})}>{selected.favorite?'移出收藏':'加入收藏'}</button></div>)}
-   <h2>来源</h2>{selected.sources.map(s=><article className="card" key={s.deviceId+s.rawId}><b>{deviceName(s.deviceId)}</b><p>{s.name} · {s.numbers.join('、')}</p><small>{s.readOnly?'只读来源':'来源联系人'}</small>
+   <h2>来源</h2>{!selected.sources.length&&<p className="hint">助手联系人，未写入系统通讯录。</p>}{selected.sources.map(s=><article className="card" key={s.deviceId+s.rawId}><b>{deviceName(s.deviceId)}</b><p>{s.name} · {s.numbers.join('、')}</p><small>{s.readOnly?'只读来源':'来源联系人'}</small>
    {!trash&&canEdit&&selected.sources.length>1&&<button disabled={busy} onClick={()=>{if(confirm('将这个来源拆分为独立联系人？'))void save('split',{deviceId:s.deviceId,rawId:s.rawId})}}>拆分</button>}</article>)}
    {!trash&&canEdit&&<details><summary>手动合并</summary><input type="search" aria-label="搜索待合并联系人" value={mergeQuery} onChange={e=>{setMergeQuery(e.target.value);setOther('')}} placeholder="搜索待合并联系人"/><select value={other} onChange={e=>setOther(e.target.value)}><option value="">选择另一联系人</option>{(mergeQuery.trim()?mergeResults:rows).filter(c=>c.id!==selected.id).map(c=><option key={c.id} value={c.id}>{c.name} · {c.numbers.join('、')}</option>)}</select><button disabled={!other||busy} onClick={()=>{const c=(mergeQuery.trim()?mergeResults:rows).find(r=>r.id===other);if(c&&confirm('核对号码与来源后，合并这两个联系人？'))void save('merge',{otherId:c.id,otherRevision:c.revision})}}>合并</button></details>}
    {!!jobs.length&&<><h2>同步记录</h2>{jobs.map(j=><p key={j.id}>{deviceName(j.deviceId)} · {states[j.state]||j.state} {j.detail}</p>)}
     {!trash&&jobs.some(j=>['conflict','failed','denied'].includes(j.state))&&<button onClick={()=>{edit(selected);void recheck()}}>核对后重新提交</button>}</>}{hint}</DetailSheet>:null;
  return <><header className="phone-toolbar"><button className="glass-circle" aria-label={favorites?'返回联系人':'个人收藏'} onClick={allContacts}><PhoneIcon name="back"/></button><h1>{favorites?'个人收藏':trash?'最近删除':'联系人'}</h1>{canEdit&&!trash?<button className="glass-circle" onClick={()=>edit(null)} aria-label="新建联系人"><PhoneIcon name="plus"/></button>:<button className="glass-circle" aria-label="互联设置" onClick={settings}><PhoneIcon name="settings"/></button>}</header>
-   {!favorites&&<button className="subtle directory-trash" onClick={()=>{setTrash(!trash);setOffset(0)}}>{trash?'返回通讯录':'最近删除'}</button>}
+   {!favorites&&<div className="directory-tools"><button className="subtle directory-trash" onClick={()=>{setTrash(!trash);setOffset(0)}}>{trash?'返回通讯录':'最近删除'}</button>{!trash&&<button className="directory-import" onClick={()=>setImporting(true)}>导入 iPhone 联系人</button>}</div>}
+   {importNotice&&<p role="status">{importNotice}</p>}
    {hint}<div className="contact-groups">{sectionContacts(rows.filter(c=>!favorites||c.favorite)).map(([letter,cards])=><section key={letter} id={'contact-section-'+letter}><h2>{letter}</h2>{cards.map(c=><button className="row contact-list-row" key={c.id} onClick={()=>{setOther('');setSelected(c)}}><PhoneAvatar name={c.name}/><span className="contact-list-name"><b>{c.name||formatPhone(c.numbers[0]||'')||'未命名'}</b>{c.conflict&&<small>待核对</small>}</span></button>)}</section>)}</div>{rows.length>8&&<aside className="contact-alphabet" aria-label="联系人索引">{sectionContacts(rows.filter(c=>!favorites||c.favorite)).map(([letter])=><button key={letter} aria-label={'跳到 '+letter+' 分组'} onClick={()=>document.getElementById('contact-section-'+letter)?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'})}>{letter}</button>)}</aside>}
-   {!rows.some(c=>!favorites||c.favorite)&&<p className="hint">{favorites?'还没有收藏联系人':query||trash?'没有匹配的联系人':'还没有联系人。请在需要共享的 Android 手机上打开「通讯数据授权」，开启通讯录共享。'}</p>}
+   {!rows.some(c=>!favorites||c.favorite)&&<p className="hint">{favorites?'还没有收藏联系人':query||trash?'没有匹配的联系人':'还没有联系人。可导入 iPhone 联系人，或在安卓开启通讯录共享。'}</p>}
    {next!==null&&<button onClick={()=>setOffset(next)}>载入更多</button>}<button className="load-more" onClick={reload}>刷新</button>{detail}</>
 }

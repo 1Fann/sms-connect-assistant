@@ -37,6 +37,10 @@ fun Route.directoryRoutes(directory:DirectoryService,
         if(!requireScope(call,"contacts.read"))return@get
         call.directoryAnswer { directory.view(call.parameters["id"].orEmpty(),devices(call))?:throw NoSuchElementException() }
     }
+    post("contacts/import"){
+        if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@post
+        call.directoryAnswer{directory.importContacts(installation(call),JSONObject(call.limitedBody(512*1024)),devices(call))}
+    }
     post("contacts/{action}"){
         if(!requireScope(call,"contacts.write")||!requireScope(call,"contacts.read"))return@post
         call.directoryAnswer {

@@ -276,6 +276,7 @@ class DirectoryService internal constructor(private val ctx: Context, internal v
 
     fun mutate(owner:String,action:String,b:JSONObject,allowed:(String)->Boolean):JSONObject =
         DirectoryEdits(this,region,allowed).run(owner,action,b)
+    fun importContacts(owner:String,body:JSONObject,allowed:(String)->Boolean)=DirectoryImport(this,allowed).run(owner,body)
 
     companion object {
         @Volatile private var instance:DirectoryService?=null

@@ -21,3 +21,5 @@
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 
 .contact-sheet{touch-action:pan-y}.poster-actions a[aria-disabled=true]{opacity:.38}.dock-icon{position:relative;display:inline-flex;align-items:center;justify-content:center}.missed-badge{position:absolute;top:-7px;right:-13px;min-width:17px;height:17px;padding:0 4px;border-radius:10px;background:#ff3b30;color:#fff;font-size:10px;font-style:normal;font-weight:650;line-height:17px;text-align:center;border:1px solid var(--bg)}
+
+.directory-tools{display:flex;align-items:center;justify-content:space-between;gap:8px}.directory-import{font-size:13px;padding:5px 8px;min-height:36px}.contact-import .card .hint{margin:8px 0 0}.import-select{background:var(--panel);width:100%;margin:10px 0}.import-file-name{overflow-wrap:anywhere}.contact-import h2{font-size:20px}.contact-import>p:not(.hint){font-size:14px}.import-preview small{overflow-wrap:anywhere}

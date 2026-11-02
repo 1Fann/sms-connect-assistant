@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev10 · iPhone 联系人导入
+
+- 互联电话导入 .vcf：本地预览、明确确认、仅保存助手姓名/号码，不写系统通讯录。
+- 去重、分批原子提交与相同请求重试；目录 v3 保留原有联系人、通话和未接查看状态。
+- 52 项 TypeScript、145 项 JVM、15 项 Android 隔离测试通过；真机文件导入等待用户确认。
+- Import iPhone .vcf files into assistant-only cards with local preview and explicit confirmation. Add duplicate detection, atomic batches and idempotent retries; migrate directory schema to v3 without changing system contacts. See [release notes](docs/releases/0.9.0-dev10.md).
+
 ## 0.9.0-dev · CommLink
 
 - 保留 0.8.9 短信入口和签名身份，加入多设备注册、逻辑线路、独立电话 PWA、分安装授权、双向联系人写回及通话记录。

@@ -64,6 +64,10 @@ class PhoneOriginTest {
             val cookie="__Host-phone="+token
             assertEquals(200,response("/api/v2/session",cookie))
             assertEquals(403,response("/api/v2/contacts",cookie))
+            assertEquals(403,response("/api/v2/contacts/import",cookie,origin))
+            val reader=PrivateStore.token()
+            db.authorize(reader,PrivateStore.Install("Reader","phone","reader","contacts.read,device:server"))
+            assertEquals(403,response("/api/v2/contacts/import","__Host-phone="+reader,origin))
             assertEquals(410,response("/api/v2/voice/web-session",cookie,origin))
             assertEquals(403,response("/api/v2/groundwire/routes",cookie))
             assertEquals(404,response("/ws",cookie))

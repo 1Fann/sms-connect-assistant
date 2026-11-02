@@ -38,3 +38,27 @@ The three SQLite host contract checks run with `python tests/directory_sync_sql_
 ## v2 · 未接来电查看状态
 
 0.9.0-dev9 起，独立目录库升级到 v2，增加 call_seen(installation,device,raw,date) 主键表。GET /api/v2/call-history/missed 返回当前电话安装及获授权设备的未查看数量；POST /api/v2/call-history/seen 接收 records:[{id,date}]，只标记匹配日期且获授权的未接记录。两者需要 calls.read；不修改 Android CallLog。不同安装互不影响，原始 ID 被重用但日期改变时仍视为新事件。表结构迁移不触及短信、配对、联系人或原通话记录。
+
+## v3 · iPhone 联系人导入
+
+0.9.0-dev10 提供「联系人 → 导入 iPhone 联系人」。在 iPhone「通讯录 → 列表」长按目标列表，导出姓名和电话号码并存储到文件，再在互联电话选择 .vcf。文件先在浏览器解析并预览；只有点击确认后才上传姓名与号码。照片、邮箱、地址、备注和账号字段均忽略。不会自动读取 iPhone 全通讯录，不要求 iCloud 凭据。
+
+仅创建助手统一名片和号码别名，不创建 Android 来源、不排队写回；无需开启 Android「允许指定来源写回」。已获通讯录读取权限的安装可以访问这些统一名片，适用于短信和通话名称匹配。同名且号码集合相同会跳过；同号码不同姓名保留独立名片供核对，不自动覆盖或强制合并。导入不是持续同步；之后修改 iPhone 联系人需要重新导出，旧助手名片不会自动更新或删除。
+
+支持常见 vCard 2.1/3.0/4.0、Apple 分组 TEL、多号码、折行、UTF-8/UTF-16 和带字符集的 quoted-printable。仅解析有有效电话号码的卡片，文件上限 10 MiB、5000 张，每张最多 32 个号码、姓名 200 字符、号码 96 字符。不支持或无号码的卡片计为跳过，导入前显示数量。不实现任意 vCard 扩展字段。
+
+新增 POST /api/v2/contacts/import，需要安装级 contacts.read + contacts.write，且经过现有 Origin/会话校验。请求 {requestId:UUID,contacts:[{name,numbers:[]}]}，每批 1–100 条、JSON 请求体最多 512 KiB；响应 {added,skipped,replayed?}。不接受来源写回目标。浏览器逐批提交，网络失败保留当前 requestId，用户可继续重试。重复 requestId + 相同数据返回既有结果；更改数据或跨安装复用被拒绝。每批原子提交，暂停/关闭不回滚已完成批次；重新选择相同文件仍按内容去重。
+
+目录库 v2 → v3 仅增加 contact_imports(id PRIMARY KEY,owner,fingerprint,result,created) 收据表，保留联系人、来源、通话记录和 call_seen。v1 也支持顺序补建两张新增表。收据不含额外明文联系人副本，沿用助手本地数据库保护。不要直接降级至使用较旧目录 schema 的 APK。
+
+### English
+
+Phone now imports exported iPhone .vcf files. In Apple's Contacts app, open Lists, touch and hold a list, choose Export, keep names/phone numbers, and Save to Files. Select that file in Phone → Contacts → Import iPhone contacts, review locally, then explicitly confirm. Only names and phone numbers are uploaded. No system contact is created or modified, no Android writeback job is queued, and no iCloud credential is required.
+
+Assistant cards are visible to installations approved for contact reading. Identical names and phone sets are skipped; different names sharing a number stay separate for review. This is an import, not continuous iPhone synchronization. Existing cards are not overwritten or removed by later exports.
+
+Common vCard 2.1/3.0/4.0, Apple grouped phone fields, folding and quoted-printable are supported. Files are limited to 10 MiB and 5000 cards; cards to 32 numbers, 200-character names and 96-character phone values. Unsupported/no-phone cards are counted as skipped. Pictures and other contact fields are ignored.
+
+POST /api/v2/contacts/import requires contacts.read and contacts.write, authenticated Phone origin/session, UUID requestId and 1–100 contacts per batch (512 KiB JSON limit). Responses report added/skipped; identical retries return a saved result. A changed body or cross-installation receipt reuse is rejected. Batches commit atomically; pausing/closing does not roll back committed work. Directory schema v3 adds only the contact_imports receipt table, preserving existing records and missed-call viewing receipts. Do not downgrade the database.
+
+Reference: [Apple export instructions](https://support.apple.com/en-ie/guide/iphone/iph075ddebf2/ios).

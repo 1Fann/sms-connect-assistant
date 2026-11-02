@@ -60,6 +60,8 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  assert.ok(['/api/status','/api/history','/api/conversations'].every(p=>startupRequests.includes(p)),
   'Read-only startup requests must be in flight before the session check completes');
  assert.equal(await page.getByText('138 0013 8000',{exact:true}).count(),0,'Authenticated rows stay hidden before the session check');
+ assert.equal(await page.getByLabel('安卓显示的配对码').count(),0,'Pending session must not display the pairing form');
+ assert.equal(await page.getByRole('region',{name:'正在连接手机'}).count(),1);
  releaseStatus();
  await page.getByText('138 0013 8000',{exact:true}).waitFor();
  assert.equal(startupRequests.filter(p=>p==='/api/history').length,1);

@@ -1,5 +1,11 @@
 # 更新记录 / Changelog
 
+## 0.9.0-dev27 · 启动状态修复
+
+- 区分会话验证中、已授权与未配对，避免重开短信时先闪出配对页面。验证期间仅显示无个人数据的列表占位。
+- 网络失败时保留重试入口；只有确认会话失效才进入配对。授权检查、并行读取与界面缓存保持生效。
+- Distinguish pending, valid and expired sessions. Show a neutral inbox shell during validation, retry network failures, and reveal pairing only after an authentication rejection. Browser fixtures cover expiry, revocation and retry without SMS sends.
+
 ## 0.9.0-dev26 · 短信启动与联系人优化
 
 - 短信界面缓存优先显示，后台先准备版本资源再替换页面；更新中断时保留完整旧版，不缓存认证 API、短信正文或凭据。

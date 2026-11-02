@@ -28,7 +28,8 @@ type HistoryPage={items:Sms[],next:string|null};
 
 function App(){
  useViewport();
- const [paired,setPaired]=useState(false),[pairing,setPairing]=useState(false),[code,setCode]=useState('');
+ const [paired,setPaired]=useState<boolean|null>(null),[pairing,setPairing]=useState(false),[code,setCode]=useState('');
+ const [sessionAttempt,setSessionAttempt]=useState(0),[sessionFailed,setSessionFailed]=useState(false);
  const [rows,setRows]=useState<Sms[]>([]),[outgoing,setOutgoing]=useState<Sms[]>([]),[cursor,setCursor]=useState<string|null>(null);
  const [active,setActive]=useState<string|null>(null),[screen,setScreen]=useState('messages'),[search,setSearch]=useState('');
  const [draft,setDraft]=useState(''),[recipient,setRecipient]=useState(''),[sims,setSims]=useState<SimLine[]>([]),[sim,setSim]=useState('');
@@ -125,6 +126,7 @@ function App(){
  }
  useEffect(()=>{
   let alive=true;
+  setPaired(null);setSessionFailed(false);setError('');
   // Read-only requests can start with the session check. Publish their results only
   // through refresh after authentication succeeds, and consume them only once.
   const initial={history:api<HistoryPage>('history'),metadata:api<ConversationState[]>('conversations')};
@@ -132,10 +134,12 @@ function App(){
   void Promise.allSettled([initial.history,initial.metadata]);
   api('status').then(()=>{if(alive)setPaired(true)}).catch(e=>{
    if(firstLoad.current===initial)firstLoad.current=null;
-   if(alive&&!(e instanceof ApiError&&e.status===401))fail(e);
+   if(!alive)return;
+   if(e instanceof ApiError&&e.status===401)setPaired(false);
+   else {setSessionFailed(true);fail(e)}
   });
   return ()=>{alive=false;if(firstLoad.current===initial)firstLoad.current=null};
- },[]);
+ },[sessionAttempt]);
  useEffect(()=>{if(!paired)return;void refresh();
   const timer=setInterval(()=>{if(!document.hidden)void refresh()},8000); const visible=()=>{if(!document.hidden)void refresh()};document.addEventListener('visibilitychange',visible);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible)};
  },[paired]);
@@ -264,8 +268,12 @@ function App(){
   }setContextKey(null);setDeleteKeys([]);setSelected(new Set());setEditing(false);setSwiped(null)}catch(e){fail(e)}finally{mutation.current=false;setBusy(false)}
  }
  function selectConversation(key:string){if(editing){setSelected(prev=>{const s=new Set(prev);s.has(key)?s.delete(key):s.add(key);return s})}else if(filter==='deleted'){setContextKey(key)}else{nearBottom.current=true;void openConversation(key)}}
- return <main className={'app screen-'+(paired?screen:'pair')}>
- {!paired?<section className="pair"><div className="app-icon"><Icon name="compose" size={40}/></div><h1>你的短信，随身相伴。</h1><p>连接自己的 Android 手机<br/>在 iPhone 上安全收发短信</p><form onSubmit={async e=>{e.preventDefault();setError('');try{await api('pair',{code,name:'iPhone Safari'});setPairing(true)}catch(e){fail(e)}}}><label>安卓显示的配对码<input value={code} onChange={e=>setCode(e.target.value.trim())} autoComplete="off" autoCapitalize="none" required maxLength={12}/></label><button className="primary" disabled={pairing}>{pairing?'请在安卓确认授权…':'连接我的手机'}</button></form><p className="hint">Safari → 分享 → 添加到主屏幕<br/>只使用你自己的 HTTPS 网址</p></section>:<>
+ return <main className={'app screen-'+(paired===null?'startup':paired?screen:'pair')}>
+ {paired===null?<section className="startup" aria-label="正在连接手机" aria-busy={!sessionFailed}>
+  <header className="list-toolbar"><span className="startup-control"/><h1 className="list-title">信息</h1><span className="startup-control"/></header>
+  {sessionFailed?<div className="startup-retry"><p>暂时无法连接手机</p><button className="primary" onClick={()=>setSessionAttempt(v=>v+1)}>重新连接</button></div>:
+   <div className="startup-placeholders" aria-hidden="true">{[0,1,2].map(i=><div className="startup-row" key={i}><span className="startup-avatar"/><span className="startup-lines"><i/><i/></span></div>)}</div>}
+ </section>:!paired?<section className="pair"><div className="app-icon"><Icon name="compose" size={40}/></div><h1>你的短信，随身相伴。</h1><p>连接自己的 Android 手机<br/>在 iPhone 上安全收发短信</p><form onSubmit={async e=>{e.preventDefault();setError('');try{await api('pair',{code,name:'iPhone Safari'});setPairing(true)}catch(e){fail(e)}}}><label>安卓显示的配对码<input value={code} onChange={e=>setCode(e.target.value.trim())} autoComplete="off" autoCapitalize="none" required maxLength={12}/></label><button className="primary" disabled={pairing}>{pairing?'请在安卓确认授权…':'连接我的手机'}</button></form><p className="hint">Safari → 分享 → 添加到主屏幕<br/>只使用你自己的 HTTPS 网址</p></section>:<>
  {['messages','chat','new'].includes(screen)&&<div className="list-page" ref={listPage} aria-hidden={screen!=='messages'} inert={screen!=='messages'}>
   <div className="list-view" ref={listView} onScroll={e=>{listScroll.current=e.currentTarget.scrollTop;setSwiped(null)}}>
    <header className="list-toolbar"><button className="glass edit-button" aria-expanded={editMenu} onClick={()=>{if(editing||pinEditing){setEditing(false);setPinEditing(false)}else setEditMenu(v=>!v);setSelected(new Set());setMenu(false);setSwiped(null)}}>{editing||pinEditing?'完成':'编辑'}</button><h1 className="list-title">{filter==='unread'?'未读信息':filter==='deleted'?'最近删除':'信息'}</h1><button className={'glass circle'+(filter==='unread'?' active-filter':'')} aria-label="筛选与设置" aria-expanded={menu} onClick={()=>{setMenu(v=>!v);setEditMenu(false);setSwiped(null)}}><Icon name="filter"/></button></header>

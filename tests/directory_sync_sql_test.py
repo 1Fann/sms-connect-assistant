@@ -13,7 +13,7 @@ SERVICE = (SRC / "DirectoryService.kt").read_text(encoding="utf-8")
 
 
 def sql_from(source, prefix):
-    statements = re.findall(r'(?:execSQL|rows|rawQuery)\((?:"""(.*?)"""|"([^"\n]*)")', source, re.S)
+    statements = re.findall(r'(?:execSQL|rows|rawQuery)\(\s*(?:"""(.*?)"""|"([^"\n]*)")', source, re.S)
     matches = [a or b for a, b in statements if (a or b).strip().startswith(prefix)]
     if len(matches) != 1:
         raise AssertionError((prefix, matches))

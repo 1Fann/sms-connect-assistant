@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 0.9.2 · 息屏联网与共享同步恢复
+
+- 主机和共享服务在 Android 13 及以下运行期间申请 Wi-Fi 高性能锁。共享端切换默认网络时可提前重试。既有定时检查会提示连续两分钟未能完成同步。
+- On Android 13 and earlier, the host and sharing services request a high-performance Wi-Fi lock. A default-network change can shorten a sharing retry, and the periodic monitor reports sustained sync failures. [中英文说明 / Release notes](docs/releases/0.9.2.md)
+
 ## 0.9.1 · 版本整理与短信启动修复
 
 - 版本名统一为 0.9.1，versionCode 升至 53，沿用原包名与签名升级链。

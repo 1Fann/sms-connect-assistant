@@ -4,6 +4,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.os.Build
+import android.os.PowerManager
+import android.net.wifi.WifiManager
 import io.ktor.http.*
 import io.ktor.serialization.gson.gson
 import io.ktor.server.application.*
@@ -40,8 +43,11 @@ class IphoneService : Service() {
     private val hub by lazy { PeerHub.get(this) }
     private val labels by lazy { PhoneLabels(this) }
     private var lastRecovery = 0L
-    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var peerJob: Job? = null
+    private var peerClient: PeerClient? = null
+    private var peerRunToken: Any? = null
     private val store by lazy { PrivateStore(this) }
     private val history by lazy { SmsHistory(this, store) }
     private val prefs by lazy { getSharedPreferences("iphone", 0) }
@@ -69,23 +75,13 @@ class IphoneService : Service() {
         // without changing service preferences, copying credentials, or opening UI.
         if (intent?.action == ACTION_REFRESH_ROOT) RootBridge.refreshIfAuthorized(this, discoverExisting=true)
         if (getSharedPreferences("peer-client",0).getBoolean("enabled",false)) {
+            holdServiceLocks("iphone:peer")
             directory.monitor.start()
-            if(peerJob?.isActive!=true) peerJob=scope.launch {
-                peerRunning=true
-                try {
-                messages.start(this@IphoneService)
-                // Keep the paired phone's polling alive when its screen is off.
-                // The service releases this lock in onDestroy, including stop-sharing.
-                wakeLock = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
-                    .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"iphone:peer").apply { acquire() }
-                PeerClient(this@IphoneService).run(history,store,::messageState,{messages.getMessage(it)!=null}){ id,address,body,slot,expires ->
-                    messages.enqueueMessage(SendRequest(EntitySource.Local, Message(id,MessageContent.Text(body),listOf(address),false,Date()),SendParams(true,true,slot,expires?.let{Date(it)},null,null)))
-                }
-                } finally { peerRunning=false }
-            }
+            startPeerLoop()
             return START_STICKY
         }
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
+        holdServiceLocks("iphone:https")
         directory.monitor.start()
         if (starting.compareAndSet(false,true)) scope.launch {
             try {
@@ -99,9 +95,9 @@ class IphoneService : Service() {
                     }
                 }
                 status= "HTTPS 已监听 [::]:8443；公网连通性未验证"
-                wakeLock = (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK,"iphone:https").apply { acquire() }
-                while(isActive) { runCatching { hub.flushPush() }; delay(10_000); BridgeMonitor.check(this@IphoneService) }
+                while(isActive) { runCatching { hub.flushPush() }; delay(10_000); runCatching { BridgeMonitor.check(this@IphoneService) } }
             }
+            catch (e: CancellationException) { throw e }
             catch (_: Exception) { status = "HTTPS 启动失败：请检查证书、私钥密码和端口"; stopSelf() }
         } else if (intent?.action == ACTION_RECOVER) scope.launch {
             synchronized(serverLock) {
@@ -136,6 +132,70 @@ class IphoneService : Service() {
         }
         if(intent?.action == ACTION_CHECK) scope.launch { BridgeMonitor.check(this@IphoneService,true) }
         return START_STICKY
+    }
+    /** Main-thread ownership avoids leaking locks when stop races an IO worker's startup. */
+    @Suppress("DEPRECATION")
+    private fun holdServiceLocks(tag: String) {
+        if (wakeLock == null) {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            try {
+                wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag).apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (_: RuntimeException) {
+                android.util.Log.w("CommLink", "CPU wake lock unavailable; service remains active")
+            }
+        }
+        // Android 14 remaps HIGH_PERF to a screen-on-only mode. Keep normal network
+        // retry and CPU ownership on those devices instead of promising a radio lock.
+        if (wifiLock == null && Build.VERSION.SDK_INT < 34) {
+            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+            try {
+                wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "$tag:wifi").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            } catch (_: RuntimeException) {
+                android.util.Log.w("CommLink", "Wi-Fi lock unavailable; continuing with normal networking")
+            }
+        }
+    }
+
+    private fun startPeerLoop() {
+        if (peerJob?.isActive == true) return
+        val client = peerClient ?: PeerClient(this).also { peerClient = it; it.observeNetwork() }
+        val owner = Any()
+        peerRunToken = owner
+        peerOwner.set(owner)
+        PeerClient.failureSince = 0L
+        PeerClient.lastProgress = android.os.SystemClock.elapsedRealtime()
+        peerJob = scope.launch {
+            try {
+                var retryMs = 2_000L
+                while (isActive && client.prefs.getBoolean("enabled", false)) {
+                    try {
+                        messages.start(this@IphoneService)
+                        client.run(history, store, ::messageState, { messages.getMessage(it) != null }) { id, address, body, slot, expires ->
+                            val message = Message(id, MessageContent.Text(body), listOf(address), false, Date())
+                            messages.enqueueMessage(SendRequest(EntitySource.Local, message, SendParams(true, true, slot, expires?.let { Date(it) }, null, null)))
+                        }
+                        break
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Failure during local initialization has no SIP or HTTPS repair action.
+                        if (!client.prefs.getBoolean("enabled", false)) break
+                        if (PeerClient.failureSince == 0L) PeerClient.failureSince = android.os.SystemClock.elapsedRealtime()
+                        PeerClient.status = "等待共享同步恢复 · " + e.javaClass.simpleName
+                        delay(retryMs)
+                        retryMs = (retryMs * 2).coerceAtMost(32_000L)
+                    }
+                }
+            } finally {
+                peerOwner.compareAndSet(owner, null)
+            }
+        }
     }
     private fun retireBrowserVoice() {
         getSharedPreferences("commlink-voice",0).edit().clear().commit()
@@ -358,9 +418,26 @@ class IphoneService : Service() {
         }
         return result
     }
-    override fun onDestroy() { scope.cancel(); directory.monitor.stop(); synchronized(serverLock) { phoneServer.stop(); server?.stop(500, 1000); server=null }; wakeLock?.let { if(it.isHeld) it.release() }; store.close(); status="已关闭"; super.onDestroy() }
+    override fun onDestroy() {
+        scope.cancel()
+        peerOwner.compareAndSet(peerRunToken, null)
+        try {
+            runCatching { peerClient?.close() }
+            runCatching { directory.monitor.stop() }
+            synchronized(serverLock) {
+                try { phoneServer.stop() } finally { server?.stop(500, 1000); server=null }
+            }
+        } finally {
+            runCatching { wifiLock?.let { if(it.isHeld)it.release() } }
+            runCatching { wakeLock?.let { if(it.isHeld)it.release() } }
+            store.close()
+            status="已关闭"
+            super.onDestroy()
+        }
+    }
     companion object {
-        @Volatile var peerRunning=false
+        private val peerOwner = java.util.concurrent.atomic.AtomicReference<Any?>()
+        val peerRunning: Boolean get() = peerOwner.get() != null
         const val ACTION_RECOVER = "me.capcom.smsgateway.iphone.RECOVER"
         const val ACTION_CHECK = "me.capcom.smsgateway.iphone.CHECK"
         const val ACTION_REFRESH_ROOT = "me.capcom.smsgateway.iphone.REFRESH_ROOT_GUARD"

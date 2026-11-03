@@ -5,6 +5,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import android.os.Build
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.LinkProperties
+import java.net.Inet6Address
 import me.capcom.smsgateway.modules.directory.PeerDirectoryAgent
 import com.google.gson.Gson
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,6 +30,55 @@ class PeerClient(private val ctx: Context) {
     val vault=SecretVault(ctx)
     private val client=OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).callTimeout(15,TimeUnit.SECONDS).build()
+    private val retry = PeerRetry()
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    // Both lifecycle methods are called by the foreground service on the main thread.
+    internal fun observeNetwork() {
+        if (Build.VERSION.SDK_INT < 24 || networkCallback != null) return
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private var current: Network? = null
+            private var hasV6Default: Boolean? = null
+            private fun wakeRetry() {
+                client.connectionPool.evictAll()
+                retry.networkAvailable()
+            }
+            override fun onAvailable(network: Network) {
+                current = network
+                hasV6Default = null
+                wakeRetry()
+            }
+            override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+                if (network != current) return
+                val present = properties.routes.any { it.isDefaultRoute && it.destination.address is Inet6Address }
+                if (hasV6Default == false && present) wakeRetry()
+                hasV6Default = present
+            }
+            override fun onLost(network: Network) {
+                if (network == current) {
+                    current = null
+                    hasV6Default = null
+                }
+            }
+        }
+        try {
+            cm.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (_: RuntimeException) {
+            // The normal timed retry also works on devices that reject registration.
+        }
+    }
+
+    internal fun close() {
+        networkCallback?.let { callback ->
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            runCatching { cm.unregisterNetworkCallback(callback) }
+        }
+        networkCallback = null
+        client.dispatcher.cancelAll()
+        client.connectionPool.evictAll()
+    }
     private class Denied : IOException("接入未获授权")
     private fun request(host:String,path:String,token:String,obj:JSONObject):JSONObject {
         require(host.matches(Regex("[A-Za-z0-9.-]+")))
@@ -79,6 +132,7 @@ class PeerClient(private val ctx: Context) {
         val monitor=me.capcom.smsgateway.modules.directory.DirectoryService.get(ctx).monitor
         val journal=PeerHub.get(ctx)
         while(currentCoroutineContext().isActive && prefs.getBoolean("enabled",false)){
+            retry.beginAttempt()
             lastProgress=android.os.SystemClock.elapsedRealtime()
             var catchingUp=false
             try{
@@ -101,7 +155,11 @@ class PeerClient(private val ctx: Context) {
                 }
                 val directory=PeerDirectoryAgent(ctx,PrivateStore.hash(secret))
                 runCatching { payload.put("directory",directory.prepare()) }
+                currentCoroutineContext().ensureActive()
+                if(!prefs.getBoolean("enabled",false))return
                 val res=request(prefs.getString("host","")!!,"sync",secret,payload)
+                currentCoroutineContext().ensureActive()
+                if(!prefs.getBoolean("enabled",false))return
                 res.optJSONObject("directory")?.let { reply->runCatching { directory.accept(reply) } }
                 if(batch.isNotEmpty())prefs.edit().putLong("cursor",batch.last().id.substringAfter(':').toLong()).commit()
                 catchingUp=batch.size==20
@@ -125,14 +183,26 @@ class PeerClient(private val ctx: Context) {
                     }
                     if(queueScope.isEmpty())store.receipt(id) else journal.clientReceipt(queueScope,id)
                 }
-                failures=0;status="已连接服务器手机 · 本机共享 "+sims.length()+" 条线路"
-            }catch(e:Exception){if(e is kotlinx.coroutines.CancellationException)throw e;failures=(failures+1).coerceAtMost(4);status="等待连接 · "+e.javaClass.simpleName}
+                failures=0
+                failureSince=0
+                status="已连接服务器手机 · 本机共享 "+sims.length()+" 条线路"
+            }catch(e:Exception){
+                if(e is kotlinx.coroutines.CancellationException)throw e
+                currentCoroutineContext().ensureActive()
+                if(failureSince==0L)failureSince=android.os.SystemClock.elapsedRealtime()
+                failures=(failures+1).coerceAtMost(4)
+                status="等待连接 · "+e.javaClass.simpleName
+            }
             when {
-                failures>0 -> delay(2000L*(1 shl failures))
+                failures>0 -> retry.waitAfterFailure(failures)
                 catchingUp -> delay(100)
                 else -> monitor.awaitWork(2000)
             }
         }
     }
-    companion object { @Volatile var status="等待连接";@Volatile var lastProgress=0L }
+    companion object {
+        @Volatile var status="等待连接"
+        @Volatile var lastProgress=0L
+        @Volatile var failureSince=0L
+    }
 }

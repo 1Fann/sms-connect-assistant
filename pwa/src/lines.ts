@@ -4,9 +4,10 @@ export type SimLine = {
  phoneId:string; phoneName:string; slot:number; simName:string;
 };
 export const lineKey=(line:SimLine)=>line.lineId ?? String(line.id);
+export const isPresentSim=(line:{present?:boolean})=>line.present!==false;
 export const canSendOn=(line:SimLine)=>line.present!==false && line.enabled!==false && line.confirmed!==false && line.online!==false && line.smsAvailable!==false;
 
-export function lineStatus(line:SimLine):string {
+export function lineStatus(line:Pick<SimLine,'present'|'enabled'|'confirmed'|'online'|'smsAvailable'|'deviceOnline'>):string {
  if(line.present===false)return '历史线路 · 已不在位';
  const states:string[]=[];
  if(line.confirmed===false)states.push('待确认');

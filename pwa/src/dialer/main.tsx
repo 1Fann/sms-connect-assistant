@@ -9,6 +9,7 @@ import './phone.css';
 import {useViewport} from '../viewport';
 import {useContactEditorDock} from './contactEditorViewport';
 import {useMissedBadge} from './missedBadge';
+import {isPresentSim,lineStatus} from '../lines';
 
 async function enablePush(){
  if(!('serviceWorker' in navigator)||!('Notification' in window))throw Error('请从 iPhone 主屏幕打开互联电话');
@@ -41,7 +42,7 @@ function App(){
   setSearching(false);setQuery('');setTab(next);
  }
  function dial(n:string,id=''){setNumber(n);if(id)hint(v=>({id,seq:v.seq+1}));switchTab('拨号键盘')}
- const sorted=[...lines].sort((a,b)=>(order.indexOf(a.lineId)+1||99999)-(order.indexOf(b.lineId)+1||99999));
+ const sorted=lines.filter(isPresentSim).sort((a,b)=>(order.indexOf(a.lineId)+1||99999)-(order.indexOf(b.lineId)+1||99999));
  const missed=useMissedBadge(session?.installationId,session?.permissions.includes('calls.read')===true);
  if(!session)return <main className="pair"><img src="/phone/icon-192.png" width="80" alt=""/><h1>互联电话</h1><p>{loading?'连接中…':waiting?'请在安卓主机上确认设备和权限':'输入安卓主机生成的三分钟配对码'}</p>
    {!waiting&&!loading&&<form onSubmit={async e=>{e.preventDefault();try{await request('pair',{code});setCode('');wait(true);setMessage('')}catch(ex){setMessage(err(ex))}}}><input required aria-label="配对码" autoCapitalize="none" autoComplete="off" value={code} onChange={e=>setCode(e.target.value.trim())}/><button className="primary">请求配对</button></form>}{message&&<p role="alert">{message}</p>}</main>;
@@ -50,7 +51,7 @@ function App(){
    <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint} openSettings={()=>switchTab('设置')}/></div>
    {tab==='最近通话'&&(can('calls.read')?<Recent canAddContacts={can('contacts.read')&&can('contacts.write')} devices={devices} dial={dial} installation={session.installationId} searching={searching} query={query} settings={()=>switchTab('设置')} contacts={()=>switchTab('个人收藏')} onSeen={missed.viewed}/>:<p>此安装未获通话记录授权</p>)}
    {(tab==='通讯录'||tab==='个人收藏')&&(can('contacts.read')?<Directory key={tab+directoryVisit} devices={devices} lines={sorted} canEdit={can('contacts.write')} favorites={tab==='个人收藏'} searchQuery={query} settings={()=>switchTab('设置')} allContacts={()=>switchTab(tab==='个人收藏'?'通讯录':'个人收藏')} dial={dial}/>:<p>此安装未获通讯录读取授权</p>)}
-   {tab==='设置'&&<><header className="phone-toolbar"><button className="glass-circle" aria-label="返回通话" onClick={()=>switchTab('最近通话')}><PhoneIcon name="back"/></button><h1>互联设置</h1><span className="toolbar-spacer"/></header><h2>设备与线路</h2>{devices.map(d=><section key={d.deviceId} className="card"><b>{d.name}</b><small>{d.online?'在线':'离线'}</small>{sorted.filter(l=>l.deviceId===d.deviceId).map(l=><div className="row" key={l.lineId}>{l.name}<span>{!l.confirmed?'待确认':l.online?'可用':'离线'}</span><button onClick={()=>{const v=[l.lineId,...sorted.map(x=>x.lineId).filter(id=>id!==l.lineId)];setOrder(v);localStorage.setItem('phone.order',JSON.stringify(v))}}>排在首位</button></div>)}</section>)}
+   {tab==='设置'&&<><header className="phone-toolbar"><button className="glass-circle" aria-label="返回通话" onClick={()=>switchTab('最近通话')}><PhoneIcon name="back"/></button><h1>互联设置</h1><span className="toolbar-spacer"/></header><h2>设备与线路</h2>{devices.map(d=><section key={d.deviceId} className="card"><b>{d.name}</b><small>{d.online?'在线':'离线'}</small>{sorted.filter(l=>l.deviceId===d.deviceId).map(l=><div className="row" key={l.lineId}>{l.name}<span>{lineStatus({...l,online:l.lineOnline??l.online})||'可用'}</span><button onClick={()=>{const v=[l.lineId,...sorted.map(x=>x.lineId).filter(id=>id!==l.lineId)];setOrder(v);localStorage.setItem('phone.order',JSON.stringify(v))}}>排在首位</button></div>)}</section>)}
    <p className="hint">网页拨号会打开 Groundwire，通话全程由 Groundwire 承载。</p>
    <h2>通知</h2><button disabled={!can('calls.read')} onClick={()=>void enablePush().then(()=>{setMessage('已开启未接来电提醒及主屏幕角标');void missed.refresh()}).catch(e=>setMessage(err(e)))}>开启未接来电提醒</button>
    <button onClick={async()=>{try{await api('push/unsubscribe',{});const reg=await navigator.serviceWorker.ready;await(await reg.pushManager.getSubscription())?.unsubscribe();setMessage('已关闭电话通知')}catch(e){setMessage(err(e))}}}>关闭电话通知</button>

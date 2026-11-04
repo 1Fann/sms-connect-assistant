@@ -9,7 +9,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  const browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL||'msedge',headless:true});
  try{
  const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
- let installation='native-fixture',missedCount=4;const page=await context.newPage(),errors=[],writes=[];
+ let installation='native-fixture',missedCount=4,cardsRemoved=false;const page=await context.newPage(),errors=[],writes=[];
  await page.addInitScript(()=>{
   navigator.mediaDevices.getUserMedia=()=>{throw Error('The phone page must never request a microphone')};
   window.WebSocket=class{constructor(){throw Error('The phone page must never open SIP/WebSocket')}};
@@ -29,7 +29,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
   const records=Array.from({length:15},(_,i)=>({id:'call-'+i,name:i%3===0?'演示联系人 '+(i+1):'',number:'55501'+String(i).padStart(2,'0'),deviceId:'server',slot:i%3===0?2:i%3===1?1:null,type:i%4===1?'missed':i%2?'incoming':'outgoing',date:Date.now()-i*4000000,duration:i%4?45:0}));
   const data={
    session:{installationId:installation,permissions:['calls.read','calls.dial','contacts.read']},
-   devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · SIM 1',slot:1,lineOnline:true,online:true,confirmed:true}],
+   devices:[{deviceId:'server',name:'主机',online:true}],lines:[{lineId:'line-a',deviceId:'server',name:'主机 · SIM 1',slot:1,present:!cardsRemoved,lineOnline:true,online:true,confirmed:true},{lineId:'old-line',deviceId:'server',name:'主机 · 旧 SIM 2',slot:2,present:false,lineOnline:true,online:true,confirmed:true},{lineId:'pending-line',deviceId:'server',name:'主机 · SIM 2',slot:2,present:!cardsRemoved,lineOnline:false,online:false,confirmed:false}],
    'groundwire/routes':{routes:[{lineId:'line-a',prefix:'*81*'}]},'voice/history':[],'call-history/missed':{count:missedCount},
    'call-history':{items:records,next:null},'contacts/version':{version:'fixture'},contacts:{items:[{id:'c',name:'演示联系人',numbers:['5550100'],favorite:false,revision:1,sources:[]}],next:null,version:'fixture'}
   };
@@ -42,6 +42,14 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.locator('.missed-badge').waitFor();
  assert.equal(await page.locator('.missed-badge').innerText(),'4');
 
+ assert.equal(await page.getByLabel('拨出线路',{exact:true}).locator('option[value="old-line"]').count(),0);
+ assert.equal(await page.getByLabel('拨出线路',{exact:true}).locator('option[value="pending-line"]').evaluate(el=>el.disabled),true);
+ await page.getByRole('button',{name:'互联设置',exact:true}).click();
+ assert.equal(await page.locator('.card .row').count(),2);
+ assert.equal(await page.getByText('主机 · 旧 SIM 2',{exact:true}).count(),0);
+ await page.getByText('待确认',{exact:true}).waitFor();
+ await page.screenshot({path:path.join(out,'settings-present-sims.png')});
+ await page.locator('nav button').filter({hasText:'拨号键盘'}).click();
  await page.screenshot({path:path.join(out,'home-keypad.png')});
  await page.locator('nav button').filter({hasText:'通话'}).click();
  await page.getByRole('button',{name:'筛选通话'}).waitFor();
@@ -129,6 +137,21 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
  await page.goto('http://127.0.0.1:'+server.address().port+'/phone/#missed');
  await page.getByRole('button',{name:'筛选通话'}).waitFor();
  assert.equal(await page.locator('.call-row-main').count(),4,'Notification deep link must still show missed calls');
+ // Removing every card hides current choices, while historical call slots stay unchanged.
+ cardsRemoved=true;
+ await page.goto('http://127.0.0.1:'+server.address().port+'/phone/');
+ const selector=page.getByLabel('拨出线路',{exact:true});
+ await selector.locator('option[value="line-a"]').waitFor({state:'attached'});
+ assert.equal(await selector.locator('option[value="line-a"]').textContent(),'原选线路不可用');
+ assert.equal(await selector.locator('option[value="old-line"],option[value="pending-line"]').count(),0);
+ await page.getByRole('button',{name:'1',exact:true}).click();await page.getByRole('button',{name:'2',exact:true}).click();await page.getByRole('button',{name:'3',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'拨打',exact:true}).getAttribute('href'),null);
+ await page.getByRole('button',{name:'互联设置',exact:true}).click();
+ assert.equal(await page.locator('.card .row').count(),0);
+ await page.locator('nav button').filter({hasText:'通话'}).click();
+ await page.locator('.call-row-main').first().waitFor();
+ assert.ok((await page.locator('.call-row-main').first().textContent()).includes('主机 · SIM 2'));
+ assert.ok((await page.locator('.call-row-main').nth(1).textContent()).includes('主机 · SIM 1'));
  assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
  console.log('PASS message-before-call actions, short center back swipe, missed badge/view receipts, keypad home and missed-call deep link, lower dock without dialer overflow, call list/detail recorded SIMs and unknown slots, Groundwire explicit-SIM launch, zero microphone/WebSocket requests, native shell, filters, poster, swipe remove/restore, dial input, zero hold, search, light/dark and small viewport; zero write/SIP requests');
  }finally{await browser.close();server.close()}

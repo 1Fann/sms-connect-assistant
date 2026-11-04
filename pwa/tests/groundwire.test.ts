@@ -8,7 +8,7 @@ test('native calls carry explicit SIM routes and preserve international digits',
  assert.equal(groundwireUri('5550100',{...line,lineId:'b',slot:2},routes,true),'groundwire:*82*5550100?dialAction=voiceCall');
 });
 test('unapproved, offline, replaced or unconfigured lines cannot launch Groundwire',()=>{
- for(const l of [undefined,{...line,lineOnline:false},{...line,confirmed:false},{...line,lineId:'replaced'}])assert.equal(groundwireUri('5550100',l,routes,true),undefined);
+ for(const l of [undefined,{...line,present:false},{...line,enabled:false},{...line,lineOnline:false},{...line,confirmed:false},{...line,lineId:'replaced'}])assert.equal(groundwireUri('5550100',l,routes,true),undefined);
  assert.equal(groundwireUri('5550100',line,routes,false),undefined);
 });
 test('dial URI rejects injection, service codes, emergencies and untrusted route prefixes',()=>{

@@ -7,7 +7,7 @@ import './style.css';
 import {NameEditor} from './NameEditor';
 import {SimNames} from './SimNames';
 type Phone={id:string,name:string};
-import {canSendOn,lineKey,lineOptionName,preferredSmsLine,type SimLine} from './lines';
+import {canSendOn,isPresentSim,lineKey,lineOptionName,preferredSmsLine,type SimLine} from './lines';
 import {Icon,Avatar} from './Icons';
 import {listTime,groupEnd,showDate,sectionTime} from './presentation';
 import {reconcile} from './reconcile';
@@ -256,7 +256,7 @@ function App(){
  const lastOutgoing=current.map(m=>m.incoming).lastIndexOf(false);
  const navigation=useNavigation(screen,listPage,detailPage,()=>{setSheet(false);setMessageMenu(null);setMenu(false);setEditMenu(false);setActive(null);setScreen('messages');setError('')});
  const back=navigation.back;
- const presentLines=sims.filter(line=>line.present!==false);
+ const presentLines=sims.filter(isPresentSim);
  const selectedLine=presentLines.find(line=>lineKey(line)===sim);
  const newMessage=()=>{setSim(preferredSmsLine(sims,localStorage.getItem('sms.last-line')));setActive(null);setRecipient('');setDraft('');setScreen('new');setError('');setMenu(false);setEditMenu(false);setPinEditing(false)};
  async function markSelected(){

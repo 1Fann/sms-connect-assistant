@@ -9,9 +9,9 @@ const server=http.createServer((req,res)=>{try{const f=path.join(root,req.url===
  try{
   const page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true,serviceWorkers:'block'});
   const phones=[{id:'server',name:'服务器手机'},{id:'peer',name:'共享手机'}];
-  const names={1:'卡 1',2:'卡 2',101:'卡 1',102:'卡 2'};let fail=false;const errors=[];let sends=0;
+  const names={1:'卡 1',2:'卡 2',101:'卡 1',102:'卡 2',10000:'旧卡'};let fail=false;const errors=[];let sends=0;
   page.on('pageerror',e=>errors.push(e.message));
-  const lines=()=>Object.entries(names).map(([key,simName])=>{const id=Number(key),p=phones[id>100?1:0];return{id,phoneId:p.id,phoneName:p.name,simName,slot:id>100?id-100:id,online:true,name:p.name+' · '+simName}});
+  const lines=()=>Object.entries(names).map(([key,simName])=>{const id=Number(key),p=phones[id>100?1:0];return{id,phoneId:p.id,phoneName:p.name,simName,slot:id===10000?2:id>100?id-100:id,present:id!==10000,confirmed:id!==102,online:id!==10000&&id!==102,name:p.name+' · '+simName}});
   await page.route('**/api/**',async route=>{
    const req=route.request(),p=new URL(req.url()).pathname;let data={};let status=200;
    if(req.method()==='POST'&&['/api/phones','/api/sims'].includes(p)){
@@ -40,9 +40,29 @@ const server=http.createServer((req,res)=>{try{const f=path.join(root,req.url===
   await page.getByRole('button',{name:'返回信息列表',exact:true}).click();await settings();
   assert.equal(await page.getByLabel('共享手机名称',{exact:true}).inputValue(),'家中手机');
   assert.equal(await page.getByLabel('家中手机 · SIM 1',{exact:true}).inputValue(),'工作卡');
+  // A previous Android subscription on the same slot must remain distinct and collapsed.
+  const history=page.locator('.sim-history');
+  assert.equal(await history.count(),1);assert.equal(await history.getAttribute('open'),null);
+  assert.equal(await page.getByLabel('家中手机 · SIM 2',{exact:true}).count(),1);
+  assert.equal(await page.getByLabel('家中手机 · SIM 2（历史线路）',{exact:true}).isVisible(),false);
+  await page.getByText('当前卡 · 待确认',{exact:true}).waitFor();
+  await history.locator('summary').click();
+  await save('家中手机 · SIM 2（历史线路）','归档卡');assert.equal(names[10000],'归档卡');
+  await history.getByText('历史线路 · 已不在位',{exact:true}).waitFor();
+  await history.locator('summary').click();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.getByRole('heading',{name:'手机与 SIM 名称'}).scrollIntoViewIfNeeded();
   await page.screenshot({path:path.resolve(__dirname,'../../verification/custom-names.png')});
+  await page.locator('.phone-names').last().scrollIntoViewIfNeeded();
+  await page.screenshot({path:path.resolve(__dirname,'../../verification/sim-history.png')});
+  await page.getByRole('button',{name:'返回信息列表',exact:true}).click();
+  await page.getByText('138 0013 8000',{exact:true}).click();
+  const select=page.getByLabel('发送线路',{exact:true});
+  assert.equal(await select.locator('option[value="10000"]').evaluate(o=>o.disabled),true);
+  assert.match(await select.locator('option[value="10000"]').textContent(),/历史线路/);
+  assert.equal(await select.locator('option[value="102"]').evaluate(o=>o.disabled),true);
+  assert.match(await select.locator('option[value="102"]').textContent(),/待确认/);
+  assert.equal(await select.inputValue(),'101');
   assert.deepEqual(errors,[]);assert.equal(sends,0);
   console.log('PASS: editable phone/SIM aliases; poll preserves draft; save failure retry; reset defaults; reload; message and selector names; unchanged routing; mobile layout; no SMS');
  }finally{await browser.close();server.close()}

@@ -113,3 +113,5 @@ dialog[data-closing=true]{pointer-events:none}
 
 /* Neutral inbox shell while the session is unknown; never flash the pairing form. */
 .startup{flex:1;min-height:0}.startup-control{width:46px;flex:0 0 46px}.startup-placeholders{padding:0 20px 0 27px}.startup-row{display:flex;align-items:center;gap:13px;min-height:90px}.startup-avatar{width:48px;height:48px;flex-shrink:0;border-radius:50%;background:var(--secondary)}.startup-lines{flex:1;border-bottom:.5px solid var(--line);padding:20px 0}.startup-lines i{display:block;width:40%;height:15px;margin:0 0 9px;border-radius:6px;background:var(--secondary)}.startup-lines i:last-child{width:78%;height:12px;margin:0}.startup-retry{padding:65px 28px;text-align:center;color:var(--muted)}.startup-retry .primary{max-width:280px;margin:20px auto}
+
+.sim-name-row .sim-line-status{margin:0 0 14px}.sim-line-status{font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}.sim-history{margin:12px 0}.sim-history>summary{cursor:pointer;padding:10px 0;font-size:.9rem}.sim-history[open]>summary{margin-bottom:4px}

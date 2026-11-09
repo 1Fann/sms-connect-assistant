@@ -1,0 +1,63 @@
+name: Signed Android Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;36.0.0"
+
+      - name: Restore signing key
+        env:
+          ENCODED_KEYSTORE: ${{ secrets.SIGNING_KEY_STORE_BASE64 }}
+        run: |
+          test -n "$ENCODED_KEYSTORE"
+          printf '%s' "$ENCODED_KEYSTORE" | base64 --decode > app/keystore.jks
+
+      - name: Build and verify signed APK
+        env:
+          SIGNING_STORE_FILE: app/keystore.jks
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          test -n "$SIGNING_STORE_PASSWORD"
+          test -n "$SIGNING_KEY_ALIAS"
+          test -n "$SIGNING_KEY_PASSWORD"
+          ./gradlew :app:assembleRelease --no-daemon
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -F "versionName='0.9.6'"
+          version_name="${GITHUB_REF_NAME#v}"
+          cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/CommLink-${version_name}.apk"
+          cd app/build/outputs/apk/release
+          sha256sum "CommLink-${version_name}.apk" > SHA256SUMS.txt
+
+      - name: Upload APK to the published release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            app/build/outputs/apk/release/CommLink-*.apk
+            app/build/outputs/apk/release/SHA256SUMS.txt
+          fail_on_unmatched_files: true

@@ -10,18 +10,24 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.capcom.smsgateway.modules.defaultsms.DefaultSms
+import me.capcom.smsgateway.modules.directory.DirectoryProvider
 
 class BridgeSetupActivity: AppCompatActivity() {
     private lateinit var state:TextView
     private lateinit var rootState:TextView
     private lateinit var interval:EditText
+    private lateinit var callLogSwitch:Switch
+    private lateinit var callLogState:TextView
+    private var renderingCallLog=false
     private var busy=false
     private val required get()=mutableListOf(Manifest.permission.READ_SMS,Manifest.permission.SEND_SMS,Manifest.permission.RECEIVE_SMS,Manifest.permission.READ_PHONE_STATE).apply {
         if(Build.VERSION.SDK_INT>=26)add(Manifest.permission.READ_PHONE_NUMBERS)
@@ -39,6 +45,14 @@ class BridgeSetupActivity: AppCompatActivity() {
         state=label("")
         button("1 · 设为默认短信应用") { if(DefaultSms.isDefault(this))toast("已是默认短信应用") else DefaultSms.request(this) }
         button("2 · 授予短信、SIM 与通知权限") { requestPermissions(required.toTypedArray(),72) }
+        label("通话记录同步")
+        callLogSwitch=Switch(this).apply {
+            text="授权并共享本机通话记录"
+            setOnCheckedChangeListener { _,enabled -> if(!renderingCallLog) setCallLogSharing(enabled) }
+            layout.addView(this)
+        }
+        callLogState=label("")
+        button("打开系统应用权限设置") { openAppPermissionSettings() }
         button("3 · 允许持续后台运行") {
             startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,Uri.parse("package:$packageName")))
         }
@@ -83,13 +97,69 @@ class BridgeSetupActivity: AppCompatActivity() {
         }
     }
     private fun toast(text:String) { Toast.makeText(this,text,Toast.LENGTH_LONG).show() }
-    override fun onResume() { super.onResume();refresh() }
+    override fun onResume() { super.onResume();refresh();refreshCallLogAccess() }
+
+    private fun setCallLogSharing(enabled:Boolean) {
+        val permission=ContextCompat.checkSelfPermission(this,Manifest.permission.READ_CALL_LOG)==PackageManager.PERMISSION_GRANTED
+        if(!enabled) {
+            getSharedPreferences("directory-consent",0).edit().putBoolean("calls.read",false).apply()
+            refreshCallLogAccess()
+            toast("本机通话记录共享已关闭")
+            return
+        }
+        if(permission) {
+            getSharedPreferences("directory-consent",0).edit().putBoolean("calls.read",true).apply()
+            refreshCallLogAccess()
+            toast("通话记录权限与本机共享已开启")
+        } else if(Build.VERSION.SDK_INT>=23) {
+            ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.READ_CALL_LOG),CALL_LOG_PERMISSION_REQUEST)
+        } else {
+            openAppPermissionSettings()
+        }
+    }
+
+    private fun refreshCallLogAccess() {
+        if(!::callLogSwitch.isInitialized)return
+        val permission=ContextCompat.checkSelfPermission(this,Manifest.permission.READ_CALL_LOG)==PackageManager.PERMISSION_GRANTED
+        val shared=getSharedPreferences("directory-consent",0).getBoolean("calls.read",false)
+        renderingCallLog=true
+        callLogSwitch.isChecked=permission&&shared
+        renderingCallLog=false
+        callLogState.text=when {
+            permission&&shared -> "已授权并共享。通话记录将在后台同步到获准访问的互联电话安装。"
+            !permission -> "尚未获得系统权限。点击开关申请；若小米手机管家拦截，请打开系统应用权限设置手动允许。"
+            else -> "系统权限已允许；开启开关后才会共享本机通话记录。"
+        }
+    }
+
+    private fun openAppPermissionSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:$packageName")))
+    }
+
+    override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray) {
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults)
+        if(requestCode!=CALL_LOG_PERMISSION_REQUEST)return
+        val granted=grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED
+        getSharedPreferences("directory-consent",0).edit().putBoolean("calls.read",granted).apply()
+        refreshCallLogAccess()
+        if(granted)toast("通话记录权限与本机共享已开启")
+        else AlertDialog.Builder(this)
+            .setTitle("系统权限未开启")
+            .setMessage("小米手机管家或系统权限管理可能拦截了请求。可前往本应用的系统权限页，手动允许“通话记录”权限后，再回到此页开启共享开关。")
+            .setPositiveButton("打开权限设置"){_,_->openAppPermissionSettings()}
+            .setNegativeButton("稍后",null).show()
+    }
+
     private fun refresh() {
         if(!::state.isInitialized)return
         val granted=required.all { ContextCompat.checkSelfPermission(this,it)==PackageManager.PERMISSION_GRANTED }
         val battery=Build.VERSION.SDK_INT>=23 && (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
         val certificate=runCatching { TlsIdentity(this).load() }.isSuccess
         state.text="默认短信应用：${if(DefaultSms.isDefault(this))"已设置" else "待设置"}\n短信 / SIM / 通知权限：${if(granted)"已授权" else "待授权"}\n电池优化豁免：${if(battery)"已允许" else "待设置"}\n有效证书：${if(certificate)"已配置" else "待配置"}\n${IphoneService.status}\n\n${BridgeMonitor.summary(this)}"
+    }
+
+    companion object {
+        private const val CALL_LOG_PERMISSION_REQUEST=73
     }
 }
 

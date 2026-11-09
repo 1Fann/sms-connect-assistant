@@ -10,6 +10,8 @@ Keep the existing SMS HTTPS origin on port 8443. Install Phone separately from t
 
 Open Settings → Configuration checks and recovery (`配置检查与自动恢复`). Select the app as the default SMS handler, grant SMS/SIM/notification permissions, and exempt it from battery optimization. Contacts access is optional and enables contact names. On MIUI, separately allow autostart and unrestricted battery use; locking the app in Recents may help. Keep MIUI optimization enabled. Setting names and behavior vary by ROM.
 
+To sync this phone's call history, explicitly enable **Authorize and share this phone's call history** in Configuration checks and recovery. The first tap requests Android's call-log permission. If Xiaomi Security does not show the prompt, open the system app-permission page, allow call-log access there, then return and enable sharing. On the host, the relevant Phone installation must also be allowed to read call history and access this device.
+
 Default SMS mode makes this app responsible for receiving and recording text messages. MMS attachments are not supported; use an appropriate client if full MMS support is needed. The native inbox supports reading and manually sending text messages.
 
 ## Domain and HTTPS

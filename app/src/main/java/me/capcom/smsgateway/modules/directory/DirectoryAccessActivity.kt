@@ -1,9 +1,12 @@
 package me.capcom.smsgateway.modules.directory
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.content.pm.PackageManager
+import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -43,7 +46,7 @@ class DirectoryAccessActivity: AppCompatActivity() {
                 else->"已关闭"
             }})
             layout.addView(Button(this).apply{
-                text=if(enabled&&granted)"关闭"+label else "开启"+label
+                text=if(enabled&&granted)"关闭"+label else if(key=="calls.read"&&!granted)"询问系统并开启通话记录权限" else "开启"+label
                 isEnabled=key!="contacts.write" || DirectoryProvider(this@DirectoryAccessActivity).allowed("contacts.read")
                 setOnClickListener{
                     if(enabled&&granted){
@@ -52,6 +55,13 @@ class DirectoryAccessActivity: AppCompatActivity() {
                         render()
                     } else if(granted){prefs.edit().putBoolean(key,true).apply();render()}
                     else ActivityCompat.requestPermissions(this@DirectoryAccessActivity,arrayOf(permission),501+index)
+                }
+            })
+            if(key=="calls.read"&&!granted)layout.addView(Button(this).apply{
+                text="打开系统应用权限设置"
+                isAllCaps=false
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:$packageName")))
                 }
             })
         }

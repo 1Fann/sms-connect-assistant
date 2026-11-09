@@ -1,5 +1,11 @@
 # 更新记录 / Changelog
 
+## 0.9.6 · 通话记录主动授权
+
+- 配置检查页新增「授权并共享本机通话记录」开关。用户主动开启时申请 Android 通话记录权限，并单独保存本机共享同意。
+- 小米手机管家拦截系统授权弹窗时，可跳转系统应用权限页手动放行；授权页也提供相同入口。
+- Add an explicit call-history authorization switch to Android setup. It requests the system permission and separately records local sharing consent, with a system settings fallback for Xiaomi permission restrictions. [中英文说明 / Release notes](docs/releases/0.9.6.md)
+
 ## 0.9.2 · 息屏联网与共享同步恢复
 
 - 主机和共享服务在 Android 13 及以下运行期间申请 Wi-Fi 高性能锁。共享端切换默认网络时可提前重试。既有定时检查会提示连续两分钟未能完成同步。

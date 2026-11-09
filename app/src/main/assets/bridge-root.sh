@@ -12,8 +12,9 @@ if [ ! -x "$BB" ]; then
     if [ -x "$candidate" ]; then BB="$candidate"; break; fi
   done
 fi
+if [ ! -x "$BB" ]; then BB=$(command -v busybox 2>/dev/null); fi
 if [ ! -x "$BB" ]; then
-  echo '未找到 Root BusyBox，请检查 Magisk / KernelSU / APatch 安装' > "$BASE/status"
+  echo '已获得 Root，但未找到守护所需的 BusyBox' > "$BASE/status"
   exit 1
 fi
 # Android mksh closes numbered descriptors on exec. BusyBox ash preserves fd 9

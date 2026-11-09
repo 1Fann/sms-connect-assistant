@@ -17,7 +17,7 @@ object RootBridge {
         val reader=Thread { p.inputStream.bufferedReader().useLines { lines -> lines.forEach { if(output.length<16384) output.append(it).append('\n') } } }.apply { isDaemon=true; start() }
         if(!p.waitFor(25,TimeUnit.SECONDS)) { p.destroyForcibly(); error("Root 请求超时，请检查授权") }
         reader.join(1000)
-        check(p.exitValue()==0) { "Root 操作未完成，请在 Magisk / KernelSU / APatch 管理器中允许通讯互联的超级用户权限，并检查 BusyBox" }
+        check(p.exitValue()==0) { "Root 操作未完成，请在超级用户管理器中允许通讯互联的 Root 权限，并检查 BusyBox" }
         return output.toString().trim()
     }
     private val stopOwned = """
@@ -41,8 +41,7 @@ object RootBridge {
         sleep 1
     """.trimIndent()
     fun status():String = run("""
-        version=${'$'}(su -v 2>/dev/null)
-        case "${'$'}version" in *KernelSU*) echo 'Root 已授权 · KernelSU';; *APatch*) echo 'Root 已授权 · APatch';; *) echo 'Root 已授权';; esac
+        echo 'Root 已授权（UID 0）'
         if [ -f $base/enabled ]; then echo 'Root 守护已启用'; else echo 'Root 守护未启用'; fi
         show_process() {
             pid=${'$'}(cat "${'$'}1" 2>/dev/null)
@@ -77,11 +76,13 @@ object RootBridge {
         val script="""
             set -e
             umask 077
-            busybox=
+            busybox=${'$'}(command -v busybox 2>/dev/null || true)
+            if [ ! -x "${'$'}busybox" ]; then
             for candidate in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
                 if [ -x "${'$'}candidate" ]; then busybox=${'$'}candidate; break; fi
             done
-            [ -n "${'$'}busybox" ] || { echo '未找到 Root BusyBox'; exit 1; }
+            fi
+            [ -x "${'$'}busybox" ] || { echo '未找到 Root BusyBox'; exit 1; }
             [ ! -L $base ] && [ ! -L /data/adb/service.d ] && [ ! -L $hook ]
             if [ -e $base ]; then [ -f $base/owner ] && [ "${'$'}(cat $base/owner)" = sms-bridge-owned-v1 ]; fi
             if [ -e $hook ]; then grep -q '^# sms-bridge-owned-v1${'$'}' $hook; fi

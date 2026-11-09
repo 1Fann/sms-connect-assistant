@@ -2,6 +2,8 @@
 
 ## 0.9.6 · 通话记录主动授权
 
+- Root 以 `su` 返回 UID 0 为准，兼容 KernelSU 守护工具并支持 PATH 查找；权限检测同时检查 AppOps，修正签名发布路径与版本标签。
+
 - 配置检查页新增「授权并共享本机通话记录」开关。用户主动开启时申请 Android 通话记录权限，并单独保存本机共享同意。
 - 小米手机管家拦截系统授权弹窗时，可跳转系统应用权限页手动放行；授权页也提供相同入口。
 - Add an explicit call-history authorization switch to Android setup. It requests the system permission and separately records local sharing consent, with a system settings fallback for Xiaomi permission restrictions. [中英文说明 / Release notes](docs/releases/0.9.6.md)

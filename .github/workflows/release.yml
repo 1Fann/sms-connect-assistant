@@ -1,6 +1,8 @@
 name: Signed Android Release
 
 on:
+  push:
+    branches: [main]
   release:
     types: [published]
 
@@ -9,12 +11,15 @@ permissions:
 
 jobs:
   build-and-upload:
+    if: github.event_name == 'release' || startsWith(github.event.head_commit.message, 'Release CommLink 0.9.6')
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || 'v0.9.6' }}
     steps:
       - name: Check out release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || github.sha }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -48,7 +53,7 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -F "versionName='0.9.6'"
-          version_name="${GITHUB_REF_NAME#v}"
+          version_name="${RELEASE_TAG#v}"
           cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/CommLink-${version_name}.apk"
           cd app/build/outputs/apk/release
           sha256sum "CommLink-${version_name}.apk" > SHA256SUMS.txt
@@ -56,7 +61,8 @@ jobs:
       - name: Upload APK to the published release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           files: |
             app/build/outputs/apk/release/CommLink-*.apk
             app/build/outputs/apk/release/SHA256SUMS.txt

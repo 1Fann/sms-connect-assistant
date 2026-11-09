@@ -6,9 +6,14 @@ BASE=/data/adb/sms-bridge
 umask 077
 BB=/data/adb/magisk/busybox
 # The supervisor has a kernel-owned lock: a stale PID file cannot block boot.
-# Magisk supplies flock; never fall back to an unlocked restart loop.
+# Require a locked supervisor on every supported Root framework.
 if [ ! -x "$BB" ]; then
-  echo '未找到 Magisk BusyBox，无法启动独立监护' > "$BASE/status"
+  for candidate in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox; do
+    if [ -x "$candidate" ]; then BB="$candidate"; break; fi
+  done
+fi
+if [ ! -x "$BB" ]; then
+  echo '未找到 Root BusyBox，请检查 Magisk / KernelSU / APatch 安装' > "$BASE/status"
   exit 1
 fi
 # Android mksh closes numbered descriptors on exec. BusyBox ash preserves fd 9

@@ -39,9 +39,10 @@ class DirectoryAccessActivity: AppCompatActivity() {
             val permission=permissions.getValue(key)
             val label=titles.getValue(key)
             val enabled=prefs.getBoolean(key,false)
-            val granted=ContextCompat.checkSelfPermission(this,permission)==PackageManager.PERMISSION_GRANTED
+            val granted=DirectoryPermissions.granted(this,permission)
+            val accessible=DirectoryPermissions.accessible(this,permission)
             layout.addView(TextView(this).apply{text=label+" · "+when{
-                enabled&&!granted->"系统未授权"
+                enabled&&!accessible->"系统权限或隐私保护限制读取"
                 enabled->"已启用"
                 else->"已关闭"
             }})
@@ -53,11 +54,13 @@ class DirectoryAccessActivity: AppCompatActivity() {
                         prefs.edit().putBoolean(key,false).apply()
                         if(key=="contacts.read")prefs.edit().putBoolean("contacts.write",false).apply()
                         render()
+                    } else if(granted&&!accessible){
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:$packageName")))
                     } else if(granted){prefs.edit().putBoolean(key,true).apply();render()}
                     else ActivityCompat.requestPermissions(this@DirectoryAccessActivity,arrayOf(permission),501+index)
                 }
             })
-            if(key=="calls.read"&&!granted)layout.addView(Button(this).apply{
+            if(key=="calls.read"&&!accessible)layout.addView(Button(this).apply{
                 text="打开系统应用权限设置"
                 isAllCaps=false
                 setOnClickListener {
@@ -69,7 +72,7 @@ class DirectoryAccessActivity: AppCompatActivity() {
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,result:IntArray){
         super.onRequestPermissionsResult(requestCode,permissions,result)
         val key=this.permissions.keys.elementAtOrNull(requestCode-501)?:return
-        val granted=result.firstOrNull()==PackageManager.PERMISSION_GRANTED
+        val granted=result.firstOrNull()==PackageManager.PERMISSION_GRANTED && DirectoryPermissions.accessible(this,this.permissions.getValue(key))
         prefs.edit().putBoolean(key,granted).apply()
         if(!granted)android.widget.Toast.makeText(this,"系统未授权，其他模块可继续使用",android.widget.Toast.LENGTH_LONG).show()
         render()

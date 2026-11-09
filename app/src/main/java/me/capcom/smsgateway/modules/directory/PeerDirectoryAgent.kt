@@ -132,7 +132,14 @@ class PeerDirectoryAgent internal constructor(context:Context, private val link:
                         status.edit().putString("contact-error",message).putLong("contact-checked",System.currentTimeMillis()).apply()
                     }
                 }
-                if(scanCalls)runCatching{scan("call")}
+                if(scanCalls) {
+                    val status=ctx.getSharedPreferences("directory-sync",0)
+                    runCatching{scan("call")}.onSuccess {
+                        status.edit().remove("call-error").apply()
+                    }.onFailure {
+                        status.edit().putString("call-error","通话记录读取失败，请检查系统权限与隐私保护设置；后台将自动重试").apply()
+                    }
+                }
             } finally {
                 synchronized(inFlight){inFlight.remove(workerKey)}
                 monitor.wake()

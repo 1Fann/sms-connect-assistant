@@ -21,7 +21,7 @@ SOURCE = Path(__file__).resolve().parents[1] / "app/src/main/assets/bridge-root.
 
 @unittest.skipUnless(SHELL, "POSIX sh required")
 class RootSupervisorTest(unittest.TestCase):
-    def run_guard(self, scenario, expected="approved", enabled=True):
+    def run_guard(self, scenario, expected="approved", enabled=True, framework="magisk"):
         with tempfile.TemporaryDirectory(prefix="sms-supervisor-") as directory:
             root = Path(directory)
             base, commands = root / "guard", root / "bin"
@@ -36,7 +36,8 @@ class RootSupervisorTest(unittest.TestCase):
             # Only the installation location is changed; the control flow is real.
             script.write_text(SOURCE.read_text(encoding="utf-8").replace(
                 "BASE=/data/adb/sms-bridge", 'BASE="$TEST_BASE"').replace(
-                "BB=/data/adb/magisk/busybox", 'BB="$TEST_BB"'), encoding="utf-8", newline="\n")
+                "BB=/data/adb/magisk/busybox", 'BB="$TEST_BB"' if framework=="magisk" else 'BB="/missing/magisk/busybox"').replace(
+                "/data/adb/ksu/bin/busybox", (commands / "busybox").as_posix() if framework=="kernelsu" else "/missing/ksu/busybox"), encoding="utf-8", newline="\n")
             mocks = {
                 "getprop": 'if [ "$SCENARIO" = boot ] && [ ! -f "$TEST_BASE/paused" ]; then echo 0; else echo 1; fi',
                 "cmd": 'printf "package:%s\\n" "$TEST_APK"',
@@ -81,6 +82,11 @@ class RootSupervisorTest(unittest.TestCase):
             self.assertFalse((base / "supervisor.pid").exists(), "exit must clean its PID marker")
             self.assertFalse((base / "fd-leak").exists(), "children must not retain the supervisor lock")
             return count, pauses, status
+
+    def test_kernelsu_busybox_without_magisk_runs_the_supervisor(self):
+        count, pauses, _ = self.run_guard("crash", framework="kernelsu")
+        self.assertEqual(3, count)
+        self.assertEqual(["1"], pauses)
 
     def test_crash_restarts_with_backoff_and_stops_when_disabled(self):
         count, pauses, _ = self.run_guard("crash")

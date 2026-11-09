@@ -19,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.capcom.smsgateway.modules.defaultsms.DefaultSms
-import me.capcom.smsgateway.modules.directory.DirectoryProvider
+import me.capcom.smsgateway.modules.directory.DirectoryPermissions
 
 class BridgeSetupActivity: AppCompatActivity() {
     private lateinit var state:TextView
@@ -107,7 +107,11 @@ class BridgeSetupActivity: AppCompatActivity() {
             toast("本机通话记录共享已关闭")
             return
         }
-        if(permission) {
+        if(permission && !DirectoryPermissions.accessible(this,Manifest.permission.READ_CALL_LOG)) {
+            refreshCallLogAccess()
+            toast("系统权限已授予，但隐私保护仍限制读取，请在系统权限设置中允许")
+            openAppPermissionSettings()
+        } else if(permission) {
             getSharedPreferences("directory-consent",0).edit().putBoolean("calls.read",true).apply()
             refreshCallLogAccess()
             toast("通话记录权限与本机共享已开启")
@@ -122,11 +126,15 @@ class BridgeSetupActivity: AppCompatActivity() {
         if(!::callLogSwitch.isInitialized)return
         val permission=ContextCompat.checkSelfPermission(this,Manifest.permission.READ_CALL_LOG)==PackageManager.PERMISSION_GRANTED
         val shared=getSharedPreferences("directory-consent",0).getBoolean("calls.read",false)
+        val accessible=DirectoryPermissions.accessible(this,Manifest.permission.READ_CALL_LOG)
         renderingCallLog=true
-        callLogSwitch.isChecked=permission&&shared
+        callLogSwitch.isChecked=accessible&&shared
         renderingCallLog=false
+        val readError=getSharedPreferences("directory-sync",0).getString("call-error",null)
         callLogState.text=when {
-            permission&&shared -> "已授权并共享。通话记录将在后台同步到获准访问的互联电话安装。"
+            accessible&&shared&&readError!=null -> readError
+            permission&&!accessible -> "系统已授予权限，但隐私保护限制了读取。请打开系统应用权限设置，允许读取通话记录。"
+            accessible&&shared -> "已授权并共享。通话记录将在后台同步到获准访问的互联电话安装。"
             !permission -> "尚未获得系统权限。点击开关申请；若小米手机管家拦截，请打开系统应用权限设置手动允许。"
             else -> "系统权限已允许；开启开关后才会共享本机通话记录。"
         }
@@ -139,7 +147,7 @@ class BridgeSetupActivity: AppCompatActivity() {
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray) {
         super.onRequestPermissionsResult(requestCode,permissions,grantResults)
         if(requestCode!=CALL_LOG_PERMISSION_REQUEST)return
-        val granted=grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED
+        val granted=grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED && DirectoryPermissions.accessible(this,Manifest.permission.READ_CALL_LOG)
         getSharedPreferences("directory-consent",0).edit().putBoolean("calls.read",granted).apply()
         refreshCallLogAccess()
         if(granted)toast("通话记录权限与本机共享已开启")

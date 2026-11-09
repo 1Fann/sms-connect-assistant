@@ -2,7 +2,13 @@ name: Signed Android Release
 
 on:
   push:
-    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
   release:
     types: [published]
 
@@ -11,15 +17,14 @@ permissions:
 
 jobs:
   build-and-upload:
-    if: github.event_name == 'release' || startsWith(github.event.head_commit.message, 'Release CommLink 0.9.6')
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || 'v0.9.6' }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
     steps:
       - name: Check out release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || github.sha }}
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -44,7 +49,7 @@ jobs:
 
       - name: Build and verify signed APK
         env:
-          SIGNING_STORE_FILE: app/keystore.jks
+          SIGNING_STORE_FILE: ${{ github.workspace }}/app/keystore.jks
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
@@ -52,19 +57,23 @@ jobs:
           test -n "$SIGNING_STORE_PASSWORD"
           test -n "$SIGNING_KEY_ALIAS"
           test -n "$SIGNING_KEY_PASSWORD"
+          version_name="${RELEASE_TAG#v}"
+          [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           ./gradlew :app:assembleRelease --no-daemon
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -F "versionName='0.9.6'"
-          version_name="${RELEASE_TAG#v}"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -F "versionName='${version_name}'"
           cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/CommLink-${version_name}.apk"
           cd app/build/outputs/apk/release
           sha256sum "CommLink-${version_name}.apk" > SHA256SUMS.txt
+
+      - name: Prepare release notes
+        run: cp "docs/releases/${RELEASE_TAG#v}.md" release-notes.md
 
       - name: Upload APK to the published release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          target_commitish: ${{ github.sha }}
+          body_path: release-notes.md
           files: |
             app/build/outputs/apk/release/CommLink-*.apk
             app/build/outputs/apk/release/SHA256SUMS.txt

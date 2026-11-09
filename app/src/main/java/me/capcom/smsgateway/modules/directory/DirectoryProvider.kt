@@ -49,7 +49,7 @@ internal class DirectoryProvider(private val ctx: Context,private val content:Di
             else -> return false
         }
         return consent.getBoolean(kind,false) &&
-            ContextCompat.checkSelfPermission(ctx,permission) == PackageManager.PERMISSION_GRANTED &&
+            DirectoryPermissions.accessible(ctx,permission) &&
             (kind != "contacts.write" || allowed("contacts.read"))
     }
 

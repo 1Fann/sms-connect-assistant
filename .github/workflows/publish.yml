@@ -23,4 +23,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.9.6 CommLink-0.9.6.apk SHA256SUMS.txt --repo 1Fann/sms-connect-assistant --target d151e24 --title 'CommLink 0.9.6' --notes-file release-notes.md
+          gh release create v0.9.6 CommLink-0.9.6.apk SHA256SUMS.txt --repo 1Fann/sms-connect-assistant --target 42cbb9f273fe51a1699e90be000b30febe59b60a --title 'CommLink 0.9.6' --notes-file release-notes.md

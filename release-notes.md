@@ -18,3 +18,6 @@ Version: 0.9.6 (versionCode 58).
 - 权限状态同时检查 Android 权限和 AppOps，通话记录读取失败时给出提示。
 - 修正正式签名文件路径；发布版本由标签确定。
 - Support KernelSU/APatch supervisor tools, validate root identity, check both runtime permissions and AppOps, surface call-log read failures, and derive signed release versions from tags.
+
+- Root 权限以 `su` 执行结果和 UID 0 为准，不限定管理框架；BusyBox 支持系统 PATH 和常见框架路径。
+- Root authorization is verified with UID 0 independently of the framework. Supervisor tools can be found on PATH or in common framework locations.

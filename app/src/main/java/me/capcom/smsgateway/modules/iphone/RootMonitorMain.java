@@ -81,6 +81,12 @@ public final class RootMonitorMain {
             }
         } catch(Exception ignored) { return false; }
     }
+    // A peer provides no local HTTPS listener. Its normal service checks the
+    // authenticated connection; the root guard restores its process and wakes
+    // the service at the configured interval without reading any credentials.
+    static boolean serviceHealthy(boolean peerMode, boolean running, String host) {
+        return peerMode ? running : healthy(host);
+    }
     static int remainingMillis(long deadline) throws SocketTimeoutException {
         long remaining=deadline-System.nanoTime();
         if(remaining<=0) throw new SocketTimeoutException("health deadline");
@@ -124,7 +130,7 @@ public final class RootMonitorMain {
                         if(probed) {
                             // A verified dead app cannot own HTTPS. Avoid a redundant network wait
                             // and a second one-second sample; live-process failures still need probes.
-                            lastHealthy=!confirmedProcessLoss && healthy(state.optString("host",""));
+                            lastHealthy=!confirmedProcessLoss && serviceHealthy(state.optBoolean("peer"),running,state.optString("host",""));
                             last=android.os.SystemClock.elapsedRealtime(); failures=lastHealthy?0:failures+1;
                             recovering=false;
                         }
@@ -144,7 +150,7 @@ public final class RootMonitorMain {
                                     recovering=requested; last=android.os.SystemClock.elapsedRealtime(); lastDiscovery=0;
                                     status(requested?"已请求恢复服务，等待下次检查确认":"系统拒绝恢复，请打开应用检查");
                                 }
-                            } else if(probed) status(lastHealthy?"Root 守护正常；本机 HTTPS 正常；每 "+minutes+" 分钟完整检测，1 秒轻量检查进程":"HTTPS 未通过检测；等待复检或恢复冷却（每小时最多 3 次）");
+                            } else if(probed) status(lastHealthy?(state.optBoolean("peer")?"Root 从设备守护：应用进程正常；每 "+minutes+" 分钟唤醒共享服务，1 秒轻量检查进程":"Root 守护正常；本机 HTTPS 正常；每 "+minutes+" 分钟完整检测，1 秒轻量检查进程"):(state.optBoolean("peer")?"从设备应用进程未运行；等待复检或恢复冷却（每小时最多 3 次）":"HTTPS 未通过检测；等待复检或恢复冷却（每小时最多 3 次）"));
                             if(probed && lastHealthy) command("/system/bin/am","start-foreground-service","--user","0","-n",COMPONENT,"-a",PACKAGE+".CHECK");
                         }
                     } catch(Exception ignored) { status("检测暂时失败，稍后重试；不会重发短信"); }

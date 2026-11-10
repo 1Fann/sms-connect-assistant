@@ -6,7 +6,7 @@ Starting with 0.9.0-dev6 (29), the Phone PWA provides contacts, call history and
 
 Configure the existing Asterisk account in Groundwire using the actual SIP server, transport, port and password. These are separate from the PWA HTTPS address. Enable Groundwire incoming push for native calls.
 
-Add explicit authenticated device/SIM routes to your PBX. The [example dialplan](../ops/asterisk/groundwire.conf.example) maps *81* and *82* to gateway 2001 slots 1 and 2, for existing authenticated accounts 1001 and 1002. Adapt all identities for your deployment; additional gateways require distinct prefixes. Official Call URI documentation does not specify a reliable account selection parameter, so SIM selection is performed by the PBX prefix regardless of the active Groundwire account.
+Add explicit authenticated device/SIM routes to your PBX. The [example dialplan](../ops/asterisk/groundwire.conf.example) maps *81* and *82* to gateway 2001 slots 1 and 2, for the authenticated client account 1001. One Groundwire account can select all configured device/SIM routes; a separate client account per SIM is not required. Adapt all identities for your deployment; additional gateways require distinct prefixes. Official Call URI documentation does not specify a reliable account selection parameter, so SIM selection is performed by the PBX prefix regardless of the active Groundwire account.
 
 On Android, open the protected Groundwire settings and verify the device lock screen. Each mapping line contains stable line ID, device ID, SIM slot, subscription ID and prefix. Saving application settings does not modify the PBX. Replaced, offline, unconfirmed or unmapped SIMs cannot inherit another route.
 
@@ -27,3 +27,17 @@ Check that no calls are active and back up private PBX settings. Preserve native
 Validate both SIMs, international numbers, incoming calls, background native audio, call-log synchronization, line replacement and authorization revocation. Automated checks must not originate real external calls. Actual iPhone app launch and carrier audio require user acceptance.
 
 Sources: [Call URIs](https://doc.acrobits.net/cloudsoftphone/call-uris/), [Dial Actions](https://doc.acrobits.net/cloudsoftphone/dialactions/).
+
+## Single-account deployment
+
+The current deployment retains client `1001` and removes `1002` (endpoint, auth, AOR and dialplan authorization). Prefixes `*81*`/`*82*` select the primary gateway slots, while deployment-specific `*83*`/`*84*` select the peer gateway slots. Unprefixed native dialing defaults to primary SIM 1; incoming cellular calls continue to ring `1001`. Back up private settings and confirm no active calls before account removal. Removing a PBX account does not remove the locally saved entry from Groundwire on iOS. This is a PBX configuration change and requires no CommLink APK update.
+
+## Outgoing destination display
+
+After validation, outgoing rules clear the internal connected-line name and set `CONNECTEDLINE(num)` to the real destination without the routing prefix. `Dial` uses option `I` to prevent gateway identity updates from replacing it with an internal `s` extension or gateway account. Apply this to both primary SIMs, both peer SIMs and the legacy unprefixed primary dialing path.
+
+See the optional [peer gateway template](../ops/asterisk/groundwire-peer.conf.example). Include its routes from the authenticated client context and include the `commlink-native-header` handler from the primary template; adapt gateway identities and prefixes to your deployment.
+
+References: [Asterisk CONNECTEDLINE](https://docs.asterisk.org/Asterisk_20_Documentation/API_Documentation/Dialplan_Functions/CONNECTEDLINE/) and [Dial option I](https://docs.asterisk.org/Asterisk_20_Documentation/API_Documentation/Dialplan_Applications/Dial/). This is a PBX dialplan fix and does not require a new APK.
+
+[来电设备与卡名称 / Incoming line aliases](releases/0.9.8.md)

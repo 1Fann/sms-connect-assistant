@@ -42,6 +42,7 @@ object BridgeMonitor {
                 if (key in setOf("enabled", "minutes", "host")) { syncState(c); schedule(c) }
             }
             c.getSharedPreferences("iphone",0).registerOnSharedPreferenceChangeListener(listener)
+            c.getSharedPreferences("peer-client",0).registerOnSharedPreferenceChangeListener(listener)
             prefs(c).registerOnSharedPreferenceChangeListener(listener)
         }
         syncState(c); schedule(c)
@@ -49,7 +50,8 @@ object BridgeMonitor {
     }
     @Synchronized fun syncState(c: Context) {
         val phone = c.getSharedPreferences("iphone",0)
-        val state = JSONObject().put("enabled", phone.getBoolean("enabled",false))
+        val peer = c.getSharedPreferences("peer-client",0).getBoolean("enabled",false)
+        val state = JSONObject().put("enabled", phone.getBoolean("enabled",false) || peer).put("peer",peer)
             .put("monitor", enabled(c)).put("minutes", minutes(c)).put("host",phone.getString("host","sms.example.com"))
         val file = android.util.AtomicFile(File(c.noBackupFilesDir,"bridge-monitor-state.json"))
         var out: java.io.FileOutputStream? = null

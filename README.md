@@ -4,7 +4,9 @@
 
 CommLink 在一部 Android 上聚合多部已授权手机的 SIM、短信、通讯录和通话记录。iPhone 从主屏幕分别打开「互联信息」和「互联电话」。日常短信仍使用原安装入口及系统库。语音使用独立的 Voice SIP Agent、Asterisk 和 Groundwire；启用前须完成网关选卡、PBX 和媒体验证。
 
-**当前版本 0.9.5（57）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。可覆盖升级同包名、同签名的旧版本；首次安装仍需按说明配置。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
+**当前版本 0.9.8（60）** 基于短信互联助手 0.8.9（23），保留原 applicationId 和签名升级链。可覆盖升级同包名、同签名的旧版本；首次安装仍需按说明配置。参见[升级与验收](docs/COMMLINK-UPGRADE.md)、[设备与线路](docs/MULTI_PHONE.md)、[联系人与通话记录](docs/COMMLINK-DIRECTORY.md)、[语音配置](docs/VOICE.zh-CN.md)。应用界面为中文，基于 [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway)，项目许可证见 [LICENSE](LICENSE)。
+
+0.9.8 同步短信设置中的手机名和卡名到 Groundwire 来电显示，并包含 0.9.7 从设备 Root 守护修复、单账号 PBX 路由模板和呼出号码显示修复。[中英文更新说明](docs/releases/0.9.8.md)。配套网关请使用 [Voice SIP Gateway custom.7](https://github.com/1Fann/voice-sip-gateway/releases/latest)。
 
 0.9.5 将未插卡隐藏规则同步到电话设置、拨号和联系人首选线路，与短信页面共用判断。拔卡后保留历史通话的手机和 SIM 来源。见[中英文更新说明](docs/releases/0.9.5.md)。
 

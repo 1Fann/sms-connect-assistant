@@ -1,0 +1,27 @@
+; Optional second gateway example. Include from the authenticated client context.
+; Requires commlink-native-header from groundwire.conf.example.
+[commlink-peer-out]
+exten => _*83*.,1,Gosub(commlink-peer-native-dial,s,1(${EXTEN:4},1))
+ same => n,Hangup()
+exten => _*84*.,1,Gosub(commlink-peer-native-dial,s,1(${EXTEN:4},2))
+ same => n,Hangup()
+[commlink-peer-native-dial]
+exten => s,1,GotoIf($["${CHANNEL(endpoint)}"="1001"]?authorized:invalid)
+ same => n(authorized),Set(__VSA_TARGET=${FILTER(0-9+,${ARG1})})
+ same => n,GotoIf($[${LEN(${ARG1})}!=${LEN(${VSA_TARGET})}]?invalid)
+ same => n,GotoIf($[${REGEX("^[+]?[0-9]{3,20}$" ${VSA_TARGET})}=0]?invalid)
+ same => n,GotoIf($["${VSA_TARGET}"="110" | "${VSA_TARGET}"="112" | "${VSA_TARGET}"="119" | "${VSA_TARGET}"="120" | "${VSA_TARGET}"="911" | "${VSA_TARGET}"="+110" | "${VSA_TARGET}"="+112" | "${VSA_TARGET}"="+119" | "${VSA_TARGET}"="+120" | "${VSA_TARGET}"="+911"]?invalid)
+ same => n,Set(__VSA_SIM=${ARG2})
+ same => n,GotoIf($["${VSA_SIM}"="1" | "${VSA_SIM}"="2"]?route:invalid)
+ same => n(route),Set(VSA_CONTACTS=${PJSIP_DIAL_CONTACTS(2002)})
+ same => n,GotoIf($[${LEN(${VSA_CONTACTS})}=0]?unavailable)
+ ; Return the real destination, not the internal Gosub extension "s".
+ same => n,Set(CONNECTEDLINE(name,i)=)
+ same => n,Set(CONNECTEDLINE(num)=${VSA_TARGET})
+ same => n,Dial(${VSA_CONTACTS},60,Ib(commlink-native-header^s^1))
+ same => n,Return()
+ same => n(unavailable),Hangup(20)
+ same => n(invalid),Hangup(28)
+
+[commlink-peer-in]
+exten => 2002,1,Goto(vsa-phone-local,2001,1)

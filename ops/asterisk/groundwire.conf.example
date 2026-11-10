@@ -1,5 +1,5 @@
 ; Native Groundwire dialing. Include commlink-groundwire-out from the authenticated phone context.
-; Example deployment: authenticated Groundwire accounts 1001/1002, VSA gateway 2001.
+; Example deployment: authenticated Groundwire account 1001, VSA gateway 2001.
 ; Prefixes select the SIM explicitly, independent of Groundwire's selected account.
 [commlink-groundwire-out]
 exten => _*81*.,1,Gosub(commlink-native-dial,s,1(${EXTEN:4},1))
@@ -8,7 +8,7 @@ exten => _*82*.,1,Gosub(commlink-native-dial,s,1(${EXTEN:4},2))
  same => n,Hangup()
 
 [commlink-native-dial]
-exten => s,1,GotoIf($["${CHANNEL(endpoint)}"="1001" | "${CHANNEL(endpoint)}"="1002"]?authorized:invalid)
+exten => s,1,GotoIf($["${CHANNEL(endpoint)}"="1001"]?authorized:invalid)
  same => n(authorized),Set(__VSA_TARGET=${FILTER(0-9+,${ARG1})})
  same => n,GotoIf($[${LEN(${ARG1})}!=${LEN(${VSA_TARGET})}]?invalid)
  same => n,GotoIf($[${REGEX("^[+]?[0-9]{3,20}$" ${VSA_TARGET})}=0]?invalid)
@@ -17,7 +17,10 @@ exten => s,1,GotoIf($["${CHANNEL(endpoint)}"="1001" | "${CHANNEL(endpoint)}"="10
  same => n,GotoIf($["${VSA_SIM}"="1" | "${VSA_SIM}"="2"]?route:invalid)
  same => n(route),Set(VSA_CONTACTS=${PJSIP_DIAL_CONTACTS(2001)})
  same => n,GotoIf($[${LEN(${VSA_CONTACTS})}=0]?unavailable)
- same => n,Dial(${VSA_CONTACTS},60,b(commlink-native-header^s^1))
+ ; Return the real destination, not the internal Gosub extension "s".
+ same => n,Set(CONNECTEDLINE(name,i)=)
+ same => n,Set(CONNECTEDLINE(num)=${VSA_TARGET})
+ same => n,Dial(${VSA_CONTACTS},60,Ib(commlink-native-header^s^1))
  same => n,Return()
  same => n(unavailable),Hangup(20)
  same => n(invalid),Hangup(28)

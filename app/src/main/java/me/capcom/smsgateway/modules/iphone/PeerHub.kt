@@ -142,7 +142,7 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
     @Synchronized fun devices()=registry.devices(readableDatabase)
     @Synchronized fun allLines():List<Map<String,Any>> {
         registry.refreshLocal(writableDatabase)
-        return registry.lines(readableDatabase)
+        return registry.lines(readableDatabase).also { me.capcom.smsgateway.modules.voice.IncomingLineNames.publish(ctx,it) }
     }
     fun lines()=allLines().filter{it["deviceId"]!="server"}
     fun line(id:String)=allLines().firstOrNull{it["lineId"]==id}
@@ -187,11 +187,13 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
         val label=checkedName(name)
         require(devices().any{it["id"]==id})
         writableDatabase.execSQL("UPDATE devices SET label=? WHERE device=?",arrayOf(label.ifEmpty{if(id=="server")"服务器手机" else "共享手机"},id))
+        allLines()
     }
     @Synchronized fun renameLine(alias:Int,name:String) {
         val label=checkedName(name)
         val line=allLines().first{it["id"]==alias}
         writableDatabase.execSQL("UPDATE lines SET name=? WHERE alias=?",arrayOf(label.ifEmpty{"卡 "+line["slot"]},alias))
+        allLines()
     }
     @Synchronized fun configureLine(lineId:String,action:String) {
         val target=line(lineId) ?: throw IllegalArgumentException("线路不存在")

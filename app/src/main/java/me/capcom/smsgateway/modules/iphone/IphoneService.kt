@@ -78,10 +78,12 @@ class IphoneService : Service() {
             holdServiceLocks("iphone:peer")
             directory.monitor.start()
             startPeerLoop()
+            if (intent?.action == ACTION_CHECK) scope.launch { BridgeMonitor.check(this@IphoneService,true) }
             return START_STICKY
         }
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
         holdServiceLocks("iphone:https")
+        scope.launch { runCatching { hub.allLines() } }
         directory.monitor.start()
         if (starting.compareAndSet(false,true)) scope.launch {
             try {

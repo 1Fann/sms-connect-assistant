@@ -4,7 +4,9 @@
 
 CommLink uses one Android host and independently paired phones to provide SMS, contacts, SIM lines and call history to two iPhone Home Screen apps. Interconnected Messages keeps the original SMS installation. Interconnected Phone connects to a separately authorised HTTPS listener. Optional voice requires a verified cellular Voice SIP Agent, an Asterisk PBX and Groundwire.
 
-**Current version 0.9.5 (57)** retains the application ID and signing chain of SMS Connect Assistant 0.8.9 (23). It can upgrade an existing installation with the same package ID and signature; fresh installations still require setup. See the [upgrade and validation guide](docs/COMMLINK-UPGRADE.md), [multi-device guide](docs/MULTI_PHONE.md), [directory guide](docs/COMMLINK-DIRECTORY.md), and [voice guide](docs/VOICE.en.md). The UI is Chinese. This project builds on [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway). See [LICENSE](LICENSE).
+**Current version 0.9.8 (60)** retains the application ID and signing chain of SMS Connect Assistant 0.8.9 (23). It can upgrade an existing installation with the same package ID and signature; fresh installations still require setup. See the [upgrade and validation guide](docs/COMMLINK-UPGRADE.md), [multi-device guide](docs/MULTI_PHONE.md), [directory guide](docs/COMMLINK-DIRECTORY.md), and [voice guide](docs/VOICE.en.md). The UI is Chinese. This project builds on [Android SMS Gateway](https://github.com/capcom6/android-sms-gateway). See [LICENSE](LICENSE).
+
+0.9.8 synchronizes configured phone/SIM aliases to incoming Groundwire calls and includes the 0.9.7 peer root guard fix, single-account PBX templates and outgoing caller display correction. See [release notes](docs/releases/0.9.8.md) and the separate [Voice SIP Gateway custom.7](https://github.com/1Fann/voice-sip-gateway/releases/latest).
 
 0.9.5 applies the shared present-SIM rule to Phone settings, dialing and contact preferences. Removing a SIM leaves historical call provenance intact. See the [bilingual release notes](docs/releases/0.9.5.md).
 

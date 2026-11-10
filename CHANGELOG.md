@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## 0.9.8 · 来电线路名称
+
+- 为本机 PBX 导出短信设置里的手机名和卡名，改名后自动更新；导出只包含显示名称，并严格校验线路绑定。
+- 配套独立 Voice SIP Gateway custom.7 传递来电实际 SIM；Root 同步与 AGI 模板支持 Groundwire 来电名称标记。[部署与验证](docs/releases/0.9.8.md)
+- Export configured phone/SIM aliases for the local PBX. The separate custom.7 gateway supplies the actual incoming slot; optional root sync and AGI templates decorate Groundwire caller display.
+
+## 0.9.7 · 从设备 Root 守护
+
+- Root 守护区分主节点 HTTPS 模式和从设备共享模式；从设备不再因本机没有 HTTPS 服务而跳过恢复。
+- 按原有检测间隔唤醒从设备同步服务，保留进程检查、恢复限额和手动停止语义。Root 为可选功能，普通收发仍不要求 Root。
+- The optional root guard now supports peer sharing without requiring a local HTTPS server. It wakes the sharing service at the configured interval, retains recovery limits, and respects manual stop. Normal messaging remains root-free.
+- 配套 Voice SIP Gateway 0.3.5-custom.6 增加 IPv6 SIP/RTP 与域名重新解析；这是独立网关 APK 的更新，不由通讯互联 APK 内置安装。
+- The separate Voice SIP Gateway 0.3.5-custom.6 adds IPv6 SIP/RTP and registrar DNS refresh. It is installed separately from CommLink.
+
 ## 0.9.6 · 通话记录主动授权
 
 - Root 以 `su` 返回 UID 0 为准，兼容 KernelSU 守护工具并支持 PATH 查找；权限检测同时检查 AppOps，修正签名发布路径与版本标签。

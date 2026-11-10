@@ -57,6 +57,12 @@ class RootMonitorSpeedTest {
         assertTrue(RootMonitorPolicy.probeDue(12000,10000,1,false,false,1,true))
         assertFalse(RootMonitorPolicy.probeDue(13000,12000,1,false,false,0,false))
     }
+    @Test fun peerGuardChecksProcessWithoutRequiringALocalHttpsServer() {
+        // Null cannot be used as an HTTPS hostname: a peer must never probe it.
+        assertTrue(RootMonitorMain.serviceHealthy(true,true,null))
+        assertFalse(RootMonitorMain.serviceHealthy(true,false,null))
+        assertFalse(RootMonitorMain.serviceHealthy(false,true,"invalid host"))
+    }
     @Test fun initialUnlockWaitIsFastThenRelaxesWithoutAccessingCredentials() {
         assertEquals(1000L,RootMonitorPolicy.waitForState(5000,6000))
         assertEquals(5000L,RootMonitorPolicy.waitForState(5000,125000))

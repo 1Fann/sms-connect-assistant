@@ -27,3 +27,6 @@ google-services.json
 *.db-wal
 *.db-shm
 !gradle/wrapper/gradle-wrapper.jar
+
+__pycache__/
+*.pyc

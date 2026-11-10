@@ -15,6 +15,7 @@ jobs:
         run: |
           python3 tests/delivery_journal_test.py
           python3 tests/directory_sync_sql_test.py
+          python3 ops/asterisk/test_incoming_line_label.py
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

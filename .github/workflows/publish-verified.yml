@@ -25,8 +25,7 @@ jobs:
           (out/m['name']).write_bytes(data)
           subprocess.run(['git','archive','--format=zip','--prefix=sms-connect-assistant/','--output='+str(out/'CommLink-0.9.9-source.zip'),m['source']],check=True)
           files=[out/m['name'],out/'CommLink-0.9.9-source.zip']
-          (out/'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name+'
-' for f in files))
+          (out/'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name+'\n' for f in files))
           PY
       - name: Confirm the original APK signing identity
         run: |

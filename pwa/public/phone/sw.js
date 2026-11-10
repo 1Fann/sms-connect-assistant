@@ -24,9 +24,9 @@ async function updateMissedBadge(){
     if(response.status===401){
       const renewed=await fetch('/api/refresh',{method:'POST',credentials:'include',signal:AbortSignal.timeout(6000)});
       if(renewed.ok)response=await request();
-      else {await self.navigator.clearAppBadge?.();return}
+      else return; // Authentication failure is not proof that the calls were viewed.
     }
-    if(response.status===401||response.status===403){await self.navigator.clearAppBadge?.();return}
+    if(response.status===401||response.status===403)return;
     if(!response.ok)throw Error('Badge count unavailable');
     const {count}=await response.json();
     if(!Number.isInteger(count)||count<0)throw Error('Invalid badge count');

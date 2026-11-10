@@ -65,7 +65,7 @@ self.addEventListener('push', event => {
   const badge = payload?.badge === false || !self.navigator?.setAppBadge
     ? Promise.resolve()
     : self.navigator.setAppBadge().catch(() => {});
-  event.waitUntil(Promise.all([notification, badge]));
+  event.waitUntil(Promise.allSettled([notification, badge]));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();

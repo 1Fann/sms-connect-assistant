@@ -16,6 +16,12 @@ async function run(replies){
  const renewed=await run([{status:401},{status:200},{status:200,body:{count:2}}]);
  assert.deepEqual(renewed.requests.map(r=>r[0]),['/api/v2/call-history/missed','/api/refresh','/api/v2/call-history/missed']);
  assert.deepEqual(renewed.badges,['dot',2]);
- assert.deepEqual((await run([{status:401},{status:401}])).badges,['dot',0]);
- console.log('PASS Phone push badge count, clearing after viewing, offline dot, refresh and revoked session; visible notification always shown');
+ assert.deepEqual((await run([{status:401},{status:401}])).badges,['dot']);
+ for(const status of [429,500,502,503])
+  assert.deepEqual((await run([{status:401},{status}])).badges,['dot']);
+ assert.deepEqual((await run([{status:401},new Error('timeout')])).badges,['dot']);
+ for(const count of [-1,1.5,'0',null])
+  assert.deepEqual((await run([{status:200,body:{count}}])).badges,['dot']);
+ assert.deepEqual((await run([{status:403}])).badges,['dot']);
+ console.log('PASS Phone push badge count, clearing after viewing, offline dot, refresh and unavailable authentication; visible notification always shown');
 })().catch(e=>{console.error(e);process.exitCode=1});

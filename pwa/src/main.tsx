@@ -249,8 +249,20 @@ function App(){
  const unreadCount=list.filter(c=>isUnread(c.items,meta.get(c.key))).length;
  useEffect(()=>{
   if(!paired||!metadataReady||!navigator.setAppBadge)return;
-  const update=unreadCount?navigator.setAppBadge(unreadCount):navigator.clearAppBadge();
-  void update.catch(()=>{});
+  // A suspended page must not overwrite a newer background push with stale state.
+  const reconcileBadge=()=>{
+   if(document.hidden)return;
+   const update=unreadCount?navigator.setAppBadge!(unreadCount):navigator.clearAppBadge!();
+   void update.catch(()=>{});
+  };
+  reconcileBadge();
+  // Resume may precede the fresh inbox response. Restore known unread state, but
+  // do not clear a newer push dot using a pre-suspension zero.
+  const restoreBadge=()=>{if(unreadCount>0)reconcileBadge()};
+  document.addEventListener('visibilitychange',restoreBadge);
+  window.addEventListener('pageshow',restoreBadge);
+  window.addEventListener('focus',restoreBadge);
+  return()=>{document.removeEventListener('visibilitychange',restoreBadge);window.removeEventListener('pageshow',restoreBadge);window.removeEventListener('focus',restoreBadge)};
  },[paired,metadataReady,unreadCount]);
  const contextItems=source.find(c=>c.key===(contextKey||lastContext.current))?.items||[],contextName=contextItems.find(m=>m.name)?.name||formatPhone(contextKey||lastContext.current||'',region);
  const lastOutgoing=current.map(m=>m.incoming).lastIndexOf(false);

@@ -26,6 +26,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
           node tests/push-preview.cjs
+          node tests/phone-badge.cjs
           node tests/dual-shell.cjs
           node tests/shell-cache.cjs
           pnpm build

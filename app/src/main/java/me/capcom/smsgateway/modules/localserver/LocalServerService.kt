@@ -9,7 +9,6 @@ import kotlinx.coroutines.launch
 import me.capcom.smsgateway.modules.events.EventBus
 import me.capcom.smsgateway.modules.localserver.events.IPReceivedEvent
 import me.capcom.smsgateway.providers.LocalIPProvider
-import me.capcom.smsgateway.providers.PublicIPProvider
 
 class LocalServerService(
     private val settings: LocalServerSettings,
@@ -36,9 +35,8 @@ class LocalServerService(
 
         scope.launch(Dispatchers.IO) {
             val localIP = LocalIPProvider(context).getIP()
-            val remoteIP = PublicIPProvider().getIP()
 
-            events.emit(IPReceivedEvent(localIP, remoteIP))
+            events.emit(IPReceivedEvent(localIP, null))
         }
     }
 

@@ -151,7 +151,17 @@ public final class RootMonitorMain {
                                     status(requested?"已请求恢复服务，等待下次检查确认":"系统拒绝恢复，请打开应用检查");
                                 }
                             } else if(probed) status(lastHealthy?(state.optBoolean("peer")?"Root 从设备守护：应用进程正常；每 "+minutes+" 分钟唤醒共享服务，1 秒轻量检查进程":"Root 守护正常；本机 HTTPS 正常；每 "+minutes+" 分钟完整检测，1 秒轻量检查进程"):(state.optBoolean("peer")?"从设备应用进程未运行；等待复检或恢复冷却（每小时最多 3 次）":"HTTPS 未通过检测；等待复检或恢复冷却（每小时最多 3 次）"));
-                            if(probed && lastHealthy) command("/system/bin/am","start-foreground-service","--user","0","-n",COMPONENT,"-a",PACKAGE+".CHECK");
+                            if(probed && lastHealthy) {
+                                if(state.optBoolean("peer")) {
+                                    command("/system/bin/am","start-foreground-service","--user","0","-n",COMPONENT,
+                                            "-a",PACKAGE+".CHECK","--ez","force_check",Boolean.toString(force));
+                                } else {
+                                    command("/system/bin/am","start-foreground-service","--user","0","-n",COMPONENT,
+                                            "-a",PACKAGE+".CHECK","--ez","force_check",Boolean.toString(force),
+                                            "--es","checked_https_host",state.optString("host",""),
+                                            "--el","checked_https_elapsed",Long.toString(last));
+                                }
+                            }
                         }
                     } catch(Exception ignored) { status("检测暂时失败，稍后重试；不会重发短信"); }
                     Thread.sleep(1000);

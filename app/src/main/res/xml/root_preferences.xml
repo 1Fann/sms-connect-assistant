@@ -15,11 +15,6 @@
         app:fragment="me.capcom.smsgateway.ui.settings.LocalServerSettingsFragment"
         app:summary="@string/port_credentials_etc"
         app:title="@string/local_server_dotdotdot" />
-    <Preference
-        android:icon="@drawable/ic_cloud_server"
-        app:fragment="me.capcom.smsgateway.ui.settings.CloudServerSettingsFragment"
-        app:summary="@string/api_url_private_token_credentials_etc"
-        app:title="@string/cloud_server_dotdotdot" />
 
     <Preference
         android:icon="@drawable/ic_messages"
@@ -33,11 +28,6 @@
         app:summary="@string/inbox_settings_summary"
         app:title="@string/inbox_dotdotdot" />
 
-    <Preference
-        android:icon="@drawable/ic_webhook"
-        app:fragment="me.capcom.smsgateway.ui.settings.WebhooksSettingsFragment"
-        app:summary="@string/retries_signing_etc"
-        app:title="@string/webhooks_dotdotdot" />
 
     <PreferenceCategory app:title="@string/encryption">
         <EditTextPreference
@@ -47,15 +37,6 @@
             app:title="@string/passphrase" />
     </PreferenceCategory>
 
-    <PreferenceCategory
-        android:summary="@string/online_status_at_the_cost_of_battery_life"
-        app:title="@string/ping">
-        <EditTextPreference
-            android:key="ping.interval_seconds"
-            app:icon="@drawable/ic_ping"
-            app:title="@string/interval_seconds"
-            app:useSimpleSummaryProvider="true" />
-    </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/logs">
         <Preference

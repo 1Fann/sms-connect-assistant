@@ -14,6 +14,24 @@ PRIVATE=(SRC/'modules/iphone/PrivateStore.kt').read_text(encoding='utf-8')
 def sql(source,prefix):
     return next(s for s in re.findall(r'"([^"\n]+)"',source) if s.startswith(prefix))
 
+class PeerPresenceWriteTest(unittest.TestCase):
+    def test_metadata_changes_are_immediate_but_identical_heartbeats_are_coalesced(self):
+        registry=(SRC/'modules/iphone/DeviceRegistry.kt').read_text(encoding='utf-8')
+        update=re.search(r'"""(\s*UPDATE devices SET last_seen=.*?)"""',HUB,re.S)[1]
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.execute(sql(registry,'CREATE TABLE devices('))
+            db.execute("INSERT INTO devices(device,label,model,push_after) VALUES('peer','fixture','old',0)")
+            def sync(now, model='test', sms_send=1):
+                return db.execute(update,(now,3,model,'15',1,sms_send,0,0,0,'','peer',now-30_000)).rowcount
+            self.assertEqual(sync(100_000),1)
+            for now in range(105_000,130_000,5_000):
+                self.assertEqual(sync(now),0)
+            self.assertEqual(sync(130_000),1)
+            self.assertEqual(sync(131_000,model='',sms_send=0),1)
+            self.assertEqual(sync(132_000,model='',sms_send=0),0)
+            self.assertEqual(sync(90_000,model='',sms_send=0),1) # Wall-clock correction.
+            self.assertEqual(db.execute("SELECT last_seen,model,sms_send FROM devices").fetchone(),(90_000,'test',0))
+
 class DeliveryJournalTest(unittest.TestCase):
     def hub(self, seed=None):
         db=sqlite3.connect(':memory:')

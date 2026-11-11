@@ -21,12 +21,10 @@ import java.util.UUID
  */
 internal class DeviceRegistry(private val ctx: Context,
     private val allowed:(String)->Boolean={ContextCompat.checkSelfPermission(ctx,it)==PackageManager.PERMISSION_GRANTED},
-    private val localSlots:()->Map<Int,Int> = {
-    SubscriptionsHelper.getActiveSimCards(ctx).mapNotNull { sim ->
-        SubscriptionsHelper.getSubscriptionId(ctx,sim.simNumber-1)?.let { sim.simNumber to it }
-    }.toMap()
-}) {
-    private val heartbeats = mutableMapOf<String, Long>()
+    private val localSlots:()->Map<Int,Int> = { SubscriptionsHelper.activeSubscriptionIdsBySlot(ctx) }
+) {
+    private data class Presence(val elapsed: Long, val wallTime: Long)
+    private val heartbeats = mutableMapOf<String, Presence>()
     private val legacyLabels = PhoneLabels(ctx)
     private var localSnapshot: Map<Int,Int>? = null
 
@@ -91,9 +89,11 @@ internal class DeviceRegistry(private val ctx: Context,
         }
     }
 
-    fun seen(device:String) { heartbeats[device]=SystemClock.elapsedRealtime() }
+    fun seen(device: String, wallTime: Long) {
+        heartbeats[device] = Presence(SystemClock.elapsedRealtime(), wallTime)
+    }
     fun offline(device:String) { heartbeats.remove(device) }
-    fun online(device:String):Boolean = device=="server" || heartbeats[device]?.let { SystemClock.elapsedRealtime()-it in 0..15000 } == true
+    fun online(device:String):Boolean = device=="server" || heartbeats[device]?.let { SystemClock.elapsedRealtime()-it.elapsed in 0..15000 } == true
 
     fun devices(db:SQLiteDatabase):List<Map<String,Any>> = db.rawQuery("SELECT device,label,model,os,last_seen,protocol,sms_read,sms_send,contacts_read,contacts_write,calls_read,voice_version FROM devices WHERE revoked=0 ORDER BY rowid",null).use{ c->
         buildList { while(c.moveToNext()) {
@@ -109,7 +109,7 @@ internal class DeviceRegistry(private val ctx: Context,
             }else features.filterIndexed { index,_-> c.getInt(index+6)!=0 }
             val version=if(id=="server")runCatching{VoiceGatewayProbe.detect(ctx)["version"] as? String}.getOrNull().orEmpty() else c.getString(11)
             add(mapOf("id" to id,"deviceId" to id,"name" to c.getString(1),"model" to c.getString(2),"androidVersion" to c.getString(3),
-                "voiceAgentVersion" to version,"lastSeen" to if(id=="server")System.currentTimeMillis() else c.getLong(4),"protocol" to c.getInt(5),"online" to online(id),
+                "voiceAgentVersion" to version,"lastSeen" to (if(id=="server") System.currentTimeMillis() else heartbeats[id]?.wallTime ?: c.getLong(4)),"protocol" to c.getInt(5),"online" to online(id),
                 "role" to if(id=="server")"server" else "peer","capabilities" to capabilities))
         }}
     }

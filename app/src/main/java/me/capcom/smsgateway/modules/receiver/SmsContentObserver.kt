@@ -169,9 +169,7 @@ class SmsContentObserver : KoinComponent {
 
                 try {
                     receiverSvc.process(
-                        context,
                         InboxMessage.Text(body, address, date, subId),
-                        true,
                     )
                 } catch (e: Exception) {
                     logsService.insert(

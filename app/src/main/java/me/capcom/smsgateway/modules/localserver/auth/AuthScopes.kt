@@ -14,6 +14,7 @@ enum class AuthScopes(val value: String) {
 
     DevicesList("devices:list"),
 
+
     WebhooksList("webhooks:list"),
     WebhooksWrite("webhooks:write"),
     WebhooksDelete("webhooks:delete"),

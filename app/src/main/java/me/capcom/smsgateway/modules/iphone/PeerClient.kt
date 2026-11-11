@@ -31,6 +31,8 @@ class PeerClient(private val ctx: Context) {
     private val client=OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).callTimeout(15,TimeUnit.SECONDS).build()
     private val retry = PeerRetry()
+    private val gson = Gson()
+    private val monitor get() = me.capcom.smsgateway.modules.directory.DirectoryService.get(ctx).monitor
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     // Both lifecycle methods are called by the foreground service on the main thread.
@@ -43,6 +45,7 @@ class PeerClient(private val ctx: Context) {
             private fun wakeRetry() {
                 client.connectionPool.evictAll()
                 retry.networkAvailable()
+                monitor.wake()
             }
             override fun onAvailable(network: Network) {
                 current = network
@@ -129,7 +132,7 @@ class PeerClient(private val ctx: Context) {
         // Migrated clients keep peer:<uuid> and their original receipt table.
         // A different master cannot inspect old jobs or acknowledge old receipts.
         val prefix=if(queueScope.isEmpty())"peer:" else "peer:"+queueScope+":"
-        val monitor=me.capcom.smsgateway.modules.directory.DirectoryService.get(ctx).monitor
+        var quietCycles = 0
         val journal=PeerHub.get(ctx)
         while(currentCoroutineContext().isActive && prefs.getBoolean("enabled",false)){
             retry.beginAttempt()
@@ -141,15 +144,13 @@ class PeerClient(private val ctx: Context) {
                 val shareSms=prefs.getBoolean("share-sms",true)
                 val canRead=shareSms && ContextCompat.checkSelfPermission(ctx,Manifest.permission.READ_SMS)==PackageManager.PERMISSION_GRANTED
                 val canSend=shareSms && ContextCompat.checkSelfPermission(ctx,Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED
+                monitor.updateSmsAccess(canRead)
                 val batch=if(canRead)history.page(cursor,20,true) else emptyList()
-                val sims=JSONObject()
-                for(s in SubscriptionsHelper.getActiveSimCards(ctx)){
-                    SubscriptionsHelper.getSubscriptionId(ctx,s.simNumber-1)?.let{sims.put(s.simNumber.toString(),it)}
-                }
+                val sims = JSONObject(SubscriptionsHelper.activeSubscriptionIdsBySlot(ctx).mapKeys { it.key.toString() })
                 val states=JSONObject()
                 for(id in inspect)states.put(id,state(prefix+id)["state"])
                 val receipts=if(queueScope.isEmpty())store.receipts() else journal.clientReceipts(queueScope)
-                val payload=JSONObject().put("protocol",3).put("model",Build.MODEL).put("os",Build.VERSION.RELEASE).put("smsAvailable",canSend).put("smsRead",canRead).put("receipts",JSONArray(receipts)).put("slots",sims).put("rows",JSONArray(Gson().toJson(batch))).put("states",states)
+                val payload=JSONObject().put("protocol",3).put("model",Build.MODEL).put("os",Build.VERSION.RELEASE).put("smsAvailable",canSend).put("smsRead",canRead).put("receipts",JSONArray(receipts)).put("slots",sims).put("rows",JSONArray(gson.toJson(batch))).put("states",states)
                 runCatching { me.capcom.smsgateway.modules.voice.VoiceGatewayProbe.detect(ctx) }.onSuccess { voice ->
                     if(voice["installed"]==true)payload.put("voiceAgentVersion",voice["version"])
                 }
@@ -183,6 +184,12 @@ class PeerClient(private val ctx: Context) {
                     }
                     if(queueScope.isEmpty())store.receipt(id) else journal.clientReceipt(queueScope,id)
                 }
+                val directoryWork = payload.optJSONObject("directory")?.let {
+                    (it.optJSONArray("events")?.length() ?: 0) > 0 || (it.optJSONArray("results")?.length() ?: 0) > 0
+                } == true
+                val active = batch.isNotEmpty() || receipts.isNotEmpty() || inspect.isNotEmpty() ||
+                    res.has("job") || directoryWork || res.optJSONObject("directory")?.has("job") == true
+                quietCycles = if (active) 0 else (quietCycles + 1).coerceAtMost(3)
                 failures=0
                 failureSince=0
                 status="已连接服务器手机 · 本机共享 "+sims.length()+" 条线路"
@@ -190,13 +197,16 @@ class PeerClient(private val ctx: Context) {
                 if(e is kotlinx.coroutines.CancellationException)throw e
                 currentCoroutineContext().ensureActive()
                 if(failureSince==0L)failureSince=android.os.SystemClock.elapsedRealtime()
+                quietCycles = 0
                 failures=(failures+1).coerceAtMost(4)
                 status="等待连接 · "+e.javaClass.simpleName
             }
             when {
                 failures>0 -> retry.waitAfterFailure(failures)
                 catchingUp -> delay(100)
-                else -> monitor.awaitWork(2000)
+                // Stay well inside the 15-second server presence window. SMS and directory
+                // changes interrupt the wait, while remote jobs remain bounded by this poll.
+                else -> monitor.awaitWork(if (quietCycles >= 3) 5000 else 2000)
             }
         }
     }

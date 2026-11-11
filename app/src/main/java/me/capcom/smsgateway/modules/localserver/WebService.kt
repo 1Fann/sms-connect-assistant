@@ -45,7 +45,6 @@ import me.capcom.smsgateway.modules.localserver.routes.DocsRoutes
 import me.capcom.smsgateway.modules.localserver.routes.InboxRoutes
 import me.capcom.smsgateway.modules.localserver.routes.LogsRoutes
 import me.capcom.smsgateway.modules.localserver.routes.MessagesRoutes
-import me.capcom.smsgateway.modules.localserver.routes.WebhooksRoutes
 import me.capcom.smsgateway.modules.notifications.NotificationsService
 import org.koin.android.ext.android.get
 import org.koin.android.ext.android.inject
@@ -170,15 +169,6 @@ class WebService : Service() {
                             it.register(this)
                         }
                     }
-                    WebhooksRoutes(get(), get()).let {
-                        route("/webhook") {
-                            it.register(this)
-                        }
-                        route("/webhooks") {
-                            it.register(this)
-                        }
-                    }
-
                     route("/logs") {
                         LogsRoutes(get()).register(this)
                     }

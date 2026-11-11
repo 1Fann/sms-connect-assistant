@@ -117,6 +117,19 @@ object SubscriptionsHelper {
      * @return List of active SIM cards, empty if none available or API level too low
      */
     @SuppressLint("MissingPermission")
+    fun activeSubscriptionIdsBySlot(context: Context): Map<Int, Int> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1 || !hasPhoneStatePermission(context)) return emptyMap()
+        val manager = getSubscriptionsManager(context) ?: return emptyMap()
+        return try {
+            manager.activeSubscriptionInfoList.orEmpty()
+                .filter { it.simSlotIndex >= 0 }
+                .associate { it.simSlotIndex + 1 to it.subscriptionId }
+        } catch (_: SecurityException) {
+            emptyMap()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     fun getActiveSimCards(context: Context): List<SimCard> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) {
             return emptyList()

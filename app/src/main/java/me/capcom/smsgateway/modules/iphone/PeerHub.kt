@@ -301,23 +301,24 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
 
     @Synchronized fun sync(token:String,b:JSONObject):JSONObject {
         val device=deviceForToken(token) ?: throw SecurityException("设备授权已撤销")
-        val reply=syncSms(device,b)
+        val now = System.currentTimeMillis()
+        val reply = syncSms(device, b, now)
+        registry.seen(device, now)
         if(b.optInt("protocol")>=3) b.optJSONObject("directory")?.let { packet->
             runCatching { directory().sync(device,packet) }.onSuccess { reply.put("directory",it) }
         }
         return reply
     }
 
-    private fun syncSms(device:String,b:JSONObject):JSONObject {
+    private fun syncSms(device: String, b: JSONObject, now: Long): JSONObject {
         val slots=DeviceRegistry.slotMap(b.getJSONObject("slots"))
         val list=b.getJSONArray("rows");require(list.length()<=40)
         val protocol=b.optInt("protocol",1)
-        val now=System.currentTimeMillis()
         val db=writableDatabase
         db.beginTransaction()
         try{
             registry.observe(db,device,slots)
-            val pushAfter=scalar("SELECT push_after FROM devices WHERE device=?",device)!!.toLong()
+            val pushAfter = if (list.length() > 0) scalar("SELECT push_after FROM devices WHERE device=?", device)!!.toLong() else 0L
             for(i in 0 until list.length()) {
                 val r=receivedRow(requireNotNull(list.optJSONObject(i)))
                 val source=r.id.removePrefix("sms:").toLong()
@@ -365,15 +366,22 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
             val inspect=rows("SELECT row FROM sends WHERE phase IN ('handed','offered','sent') AND device=? ORDER BY checked,rowid LIMIT 100",arrayOf(device)).map{it.id}
             inspect.forEach {db.execSQL("UPDATE sends SET checked=? WHERE device=? AND id=?",arrayOf(now,device,it))}
             response.put("inspect",JSONArray(inspect))
-            db.execSQL("UPDATE devices SET last_seen=?,protocol=?,model=CASE WHEN ?='' THEN model ELSE ? END,os=? WHERE device=?",
-                arrayOf(now,protocol,b.optString("model").take(80),b.optString("model").take(80),b.optString("os").take(32),device))
-            val directory=b.optJSONObject("directory")
-            fun flag(value:Boolean)=if(value)1 else 0
-            db.execSQL("UPDATE devices SET sms_read=?,sms_send=?,contacts_read=?,contacts_write=?,calls_read=?,voice_version=? WHERE device=?",
-                arrayOf(flag(b.optBoolean("smsRead",true)),flag(b.optBoolean("smsAvailable",true)),flag(directory?.optBoolean("contacts")==true),
-                    flag(directory?.optBoolean("write")==true),flag(directory?.optBoolean("calls")==true),b.optString("voiceAgentVersion").take(40),device))
+            val directory = b.optJSONObject("directory")
+            fun flag(value: Boolean) = if (value) 1 else 0
+            // Presence updates in memory on every successful sync. Persist a snapshot
+            // at most every 30 seconds unless a capability or device detail changed.
+            db.execSQL("""
+                UPDATE devices SET last_seen=?1, protocol=?2, model=COALESCE(NULLIF(?3,''),model), os=?4,
+                    sms_read=?5, sms_send=?6, contacts_read=?7, contacts_write=?8, calls_read=?9, voice_version=?10
+                WHERE device=?11 AND (
+                    last_seen<=?12 OR last_seen>?1 OR protocol<>?2 OR (?3<>'' AND model<>?3) OR os<>?4 OR
+                    sms_read<>?5 OR sms_send<>?6 OR contacts_read<>?7 OR contacts_write<>?8 OR calls_read<>?9 OR voice_version<>?10
+                )
+            """.trimIndent(), arrayOf(now, protocol, b.optString("model").take(80), b.optString("os").take(32),
+                flag(b.optBoolean("smsRead", true)), flag(b.optBoolean("smsAvailable", true)),
+                flag(directory?.optBoolean("contacts") == true), flag(directory?.optBoolean("write") == true),
+                flag(directory?.optBoolean("calls") == true), b.optString("voiceAgentVersion").take(40), device, now - 30_000L))
             db.setTransactionSuccessful()
-            registry.seen(device)
             return response
         }finally{db.endTransaction()}
     }

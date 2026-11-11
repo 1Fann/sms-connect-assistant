@@ -56,9 +56,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
-        if (preference.key == "ping.interval_seconds"
-            || preference.key == "logs.lifetime_days"
-        ) {
+        if (preference.key == "logs.lifetime_days") {
             (preference as EditTextPreference).setOnBindEditTextListener {
                 it.inputType = InputType.TYPE_CLASS_NUMBER
                 it.setSelectAllOnFocus(true)

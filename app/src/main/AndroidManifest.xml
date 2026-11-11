@@ -39,10 +39,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SmsGateway">
-        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+
         <activity android:name=".modules.iphone.BridgeSetupActivity" android:exported="false" />
         <activity android:name=".modules.iphone.BridgeSettingsActivity" android:exported="false" />
-        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+
         <receiver android:name=".modules.defaultsms.SmsDeliverReceiver" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
             <intent-filter><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent-filter>
         </receiver>
@@ -71,16 +71,6 @@
         <activity android:name=".modules.voice.VoiceSetupActivity" android:exported="false" />
         <activity android:name=".modules.iphone.PeerSetupActivity" android:exported="true" />
         <service android:name=".modules.iphone.IphoneService" android:exported="false" android:foregroundServiceType="connectedDevice" />
-        <service
-            android:name=".modules.gateway.services.SSEForegroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-        <service
-            android:name=".modules.ping.services.PingForegroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
 
         <receiver
             android:name=".modules.receiver.MessagesReceiver"
@@ -106,14 +96,6 @@
             </intent-filter>
         </receiver>
 
-        <service
-            android:name=".services.PushService"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
 
         <receiver
             android:name=".receivers.EventsReceiver"

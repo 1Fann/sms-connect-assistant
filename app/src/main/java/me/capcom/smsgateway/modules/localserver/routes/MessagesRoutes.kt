@@ -16,7 +16,6 @@ import me.capcom.smsgateway.data.entities.MessageWithRecipients
 import me.capcom.smsgateway.domain.EntitySource
 import me.capcom.smsgateway.domain.MessageContent
 import me.capcom.smsgateway.domain.ProcessingState
-import me.capcom.smsgateway.domain.WebhookDelivery
 import me.capcom.smsgateway.helpers.DateTimeParser
 import me.capcom.smsgateway.modules.incoming.db.IncomingMessageType
 import me.capcom.smsgateway.modules.localserver.LocalServerSettings
@@ -285,9 +284,6 @@ class MessagesRoutes(
                     context = context,
                     period = request.period,
                     messageTypes = request.messageTypes ?: setOf(IncomingMessageType.SMS),
-                    request.webhookDelivery
-                        ?: (if (request.triggerWebhooks == false) WebhookDelivery.Disabled else null)
-                        ?: WebhookDelivery.Individual,
                 )
                 call.respond(HttpStatusCode.Accepted)
             } catch (e: Exception) {

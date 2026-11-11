@@ -12,8 +12,6 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas".toString())
 }
 
-// Local-only builds do not need a Firebase account. Upstream cloud builds remain opt-in.
-if (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }
 
 android {
     compileSdk 35
@@ -23,8 +21,8 @@ android {
         applicationId "me.capcom.smsgateway.iphone"
         minSdk 21
         targetSdk 33
-        versionCode 61
-        versionName "0.9.9"
+        versionCode 64
+        versionName "0.9.12"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -124,7 +122,6 @@ dependencies {
     implementation("io.ktor:ktor-client-okhttp:$ktor_version")
 
     implementation("com.squareup.okhttp3:okhttp:$okhttp_version")
-    implementation("com.squareup.okhttp3:okhttp-sse:$okhttp_version")
 
     // Kotlin + coroutines
     implementation "androidx.work:work-runtime-ktx:$work_version"
@@ -146,8 +143,6 @@ dependencies {
     ksp("androidx.room:room-compiler:$room_version")
 
     // Import the Firebase BoM
-    implementation platform('com.google.firebase:firebase-bom:31.1.1')
-    implementation 'com.google.firebase:firebase-messaging-ktx'
 
     implementation 'com.googlecode.libphonenumber:libphonenumber:9.0.42'
 

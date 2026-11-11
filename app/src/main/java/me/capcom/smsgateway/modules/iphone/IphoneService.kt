@@ -37,7 +37,7 @@ class IphoneService : Service() {
     private val directory by lazy { me.capcom.smsgateway.modules.directory.DirectoryService.get(this) }
     private var directoryJob: Job? = null
     private val phoneServer by lazy { PhoneServer(this,store,hub) }
-    private var server: ApplicationEngine? = null
+    @Volatile private var server: ApplicationEngine? = null
     private val starting = java.util.concurrent.atomic.AtomicBoolean(false)
     private val serverLock = Any()
     private val hub by lazy { PeerHub.get(this) }
@@ -78,7 +78,7 @@ class IphoneService : Service() {
             holdServiceLocks("iphone:peer")
             directory.monitor.start()
             startPeerLoop()
-            if (intent?.action == ACTION_CHECK) scope.launch { BridgeMonitor.check(this@IphoneService,true) }
+            checkRequested(intent)
             return START_STICKY
         }
         if (!prefs.getBoolean("enabled", false)) { stopSelf(); return START_NOT_STICKY }
@@ -132,9 +132,20 @@ class IphoneService : Service() {
                 java.io.File(noBackupFilesDir,"commlink-groundwire-import-result").writeText("failed")
             }finally{file.delete()}
         }
-        if(intent?.action == ACTION_CHECK) scope.launch { BridgeMonitor.check(this@IphoneService,true) }
+        checkRequested(intent)
         return START_STICKY
     }
+    private fun checkRequested(intent: Intent?) {
+        if (intent?.action != ACTION_CHECK) return
+        // The service is non-exported. Accept a fresh successful probe only while
+        // the existing HTTPS listener is still present.
+        val verifiedHttps = if (server == null) null else intent.getStringExtra("checked_https_host")?.let {
+            it to intent.getLongExtra("checked_https_elapsed", 0)
+        }
+        val force = intent.getBooleanExtra("force_check", true)
+        scope.launch { BridgeMonitor.check(this@IphoneService, force, verifiedHttps) }
+    }
+
     /** Main-thread ownership avoids leaking locks when stop races an IO worker's startup. */
     @Suppress("DEPRECATION")
     private fun holdServiceLocks(tag: String) {

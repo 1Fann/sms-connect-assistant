@@ -168,7 +168,6 @@ class MmsContentObserver : KoinComponent {
 
         message?.let { msg ->
             receiverSvc.process(
-                context,
                 InboxMessage.MMS(
                     mmsId.toString(),
                     msg.body,
@@ -186,7 +185,6 @@ class MmsContentObserver : KoinComponent {
                     msg.date,
                     msg.subscriptionId
                 ),
-                true,
             )
         }
     }

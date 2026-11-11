@@ -76,7 +76,7 @@ object BridgeMonitor {
             (if(time>0) "\n上次检查：${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(time))}" else "\n尚未检查")+
             "\n"+p.getString("result","首次配置后可立即检查")
     }
-    suspend fun check(c: Context, force: Boolean=false): String = withContext(Dispatchers.IO) {
+    suspend fun check(c: Context, force: Boolean=false, verifiedHttps: Pair<String, Long>? = null): String = withContext(Dispatchers.IO) {
         if(!lock.tryLock()) return@withContext "正在检查，请稍后刷新"
         try {
             val p=prefs(c); val now=System.currentTimeMillis()
@@ -114,7 +114,10 @@ object BridgeMonitor {
             if(cert==null) issues.add("证书缺失、过期或无法读取，请检查证书配置")
             else if(cert.notAfter.time-now<30L*86400_000) issues.add("证书将在 30 天内到期，请查看自动续期结果")
             val host=phone.getString("host","sms.example.com")!!
-            val localHealthy = cert!=null && probe(host)
+            val verifiedByRoot = verifiedHttps?.let { (checkedHost, checkedAt) ->
+                checkedHost == host && checkedAt > 0 && android.os.SystemClock.elapsedRealtime() - checkedAt in 0..10_000L
+            } == true
+            val localHealthy = cert != null && (verifiedByRoot || probe(host))
             val failures=if(localHealthy) 0 else p.getInt("failures",0)+1
             p.edit().putInt("failures",failures).apply()
             var repaired=false

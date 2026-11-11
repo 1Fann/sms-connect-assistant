@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.database.ContentObserver
 import android.provider.ContactsContract
+import android.provider.Telephony
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
@@ -18,6 +19,10 @@ internal class DirectoryMonitor(private val ctx:Context) {
     val generation:Long get() = sequence.get()
     private var running = false
     private var registered = false
+    private var smsRegistered = false
+    private val smsObserver = object : ContentObserver(null) {
+        override fun onChange(selfChange: Boolean) = wake()
+    }
     private val consent = ctx.getSharedPreferences("directory-consent",0)
     private val provider = DirectoryProvider(ctx)
     private val observer = object:ContentObserver(null) {
@@ -50,12 +55,27 @@ internal class DirectoryMonitor(private val ctx:Context) {
         }
     }
 
+    @Synchronized fun updateSmsAccess(canRead: Boolean) {
+        if (!running || canRead == smsRegistered) return
+        if (canRead) {
+            try {
+                ctx.contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, smsObserver)
+                smsRegistered = true
+            } catch (_: SecurityException) { /* The timed sync still works. */ }
+        } else {
+            ctx.contentResolver.unregisterContentObserver(smsObserver)
+            smsRegistered = false
+        }
+    }
+
     @Synchronized fun stop() {
         if(!running)return
         running = false
         consent.unregisterOnSharedPreferenceChangeListener(consentListener)
         if(registered)ctx.contentResolver.unregisterContentObserver(observer)
         registered = false
+        if (smsRegistered) ctx.contentResolver.unregisterContentObserver(smsObserver)
+        smsRegistered = false
     }
 
     fun invalidateContacts() { sequence.incrementAndGet(); wake() }

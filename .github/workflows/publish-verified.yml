@@ -1,0 +1,44 @@
+name: Publish verified CommLink APK
+on:
+  push:
+    branches: ['publish-*-verified']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decode and verify the production-signed APK
+        run: |
+          python3 - <<'PY'
+          import base64,json,pathlib,hashlib,subprocess
+          m=json.loads(pathlib.Path('.release-bundle/manifest.json').read_text())
+          assert m['version']=='0.9.12' and m['versionCode']==64
+          expected=json.loads(pathlib.Path('docs/releases/0.9.12.manifest.json').read_text())
+          assert all(m[k]==v for k,v in expected.items())
+          data=base64.b64decode(b''.join(pathlib.Path(n).read_bytes() for n in m['parts']),validate=True)
+          assert len(data)==m['size'] and hashlib.sha256(data).hexdigest()==m['sha256']
+          out=pathlib.Path('.work/verified-release');out.mkdir(parents=True,exist_ok=True)
+          (out/m['name']).write_bytes(data)
+          subprocess.run(['git','archive','--format=zip','--prefix=sms-connect-assistant/','--output='+str(out/'CommLink-0.9.12-source.zip'),m['source']],check=True)
+          files=[out/m['name'],out/'CommLink-0.9.12-source.zip']
+          (out/'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name+'\n' for f in files))
+          PY
+      - name: Confirm the original APK signing identity
+        run: |
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          test -n "$signer"
+          "$signer" verify --print-certs .work/verified-release/CommLink-0.9.12.apk | grep -F '9e85f4c7e8330d222008aba01bac091f929ddd7b4db6d2621d1aa6834227de51'
+      - name: Upload all assets before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload v0.9.12 --clobber .work/verified-release/CommLink-0.9.12.apk .work/verified-release/CommLink-0.9.12-source.zip .work/verified-release/SHA256SUMS.txt
+          id=$(gh api "repos/$GH_REPO/releases" --jq '.[] | select(.tag_name=="v0.9.12") | .id')
+          test -n "$id"
+          gh api --method PATCH "repos/$GH_REPO/releases/$id" -F draft=false -F prerelease=false -f make_latest=true -f name='通讯互联 CommLink 0.9.12' -F body=@docs/releases/0.9.12.md

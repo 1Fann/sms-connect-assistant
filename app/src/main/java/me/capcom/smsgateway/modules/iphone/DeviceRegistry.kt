@@ -28,6 +28,23 @@ internal class DeviceRegistry(private val ctx: Context,
     private val legacyLabels = PhoneLabels(ctx)
     private var localSnapshot: Map<Int,Int>? = null
 
+    private data class SlotPolicy(val slot:Int,val lineId:String,val name:String,val enabled:Int,val sort:Int)
+    private fun slotPolicies(db:SQLiteDatabase,device:String):List<SlotPolicy> = db.rawQuery(
+        "SELECT cast(substr(p.name,length(?)+1) AS INTEGER),l.line_id,l.name,l.enabled,l.sort_order FROM line_preferences p JOIN lines l ON l.line_id=p.line_id WHERE instr(p.name,?)=1",
+        arrayOf("takeover:$device:","takeover:$device:")
+    ).use { c -> buildList { while(c.moveToNext())add(SlotPolicy(c.getInt(0),c.getString(1),c.getString(2),c.getInt(3),c.getInt(4))) } }
+
+    fun setSlotTakeover(db:SQLiteDatabase,device:String,slot:Int,lineId:String,enabled:Boolean) {
+        val key="takeover:$device:$slot"
+        if(!enabled){db.execSQL("DELETE FROM line_preferences WHERE name=?",arrayOf(key));return}
+        db.beginTransaction()
+        try {
+            db.execSQL("INSERT OR REPLACE INTO line_preferences(name,line_id) VALUES(?,?)",arrayOf(key,lineId))
+            db.execSQL("UPDATE lines SET confirmed=1 WHERE line_id=? AND present=1",arrayOf(lineId))
+            db.setTransactionSuccessful()
+        } finally {db.endTransaction()}
+    }
+
 
     fun create(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE devices(device TEXT PRIMARY KEY,auth TEXT UNIQUE,label TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',os TEXT NOT NULL DEFAULT '',last_seen INTEGER NOT NULL DEFAULT 0,protocol INTEGER NOT NULL DEFAULT 1,sms_read INTEGER NOT NULL DEFAULT 1,sms_send INTEGER NOT NULL DEFAULT 1,contacts_read INTEGER NOT NULL DEFAULT 0,contacts_write INTEGER NOT NULL DEFAULT 0,calls_read INTEGER NOT NULL DEFAULT 0,voice_version TEXT NOT NULL DEFAULT '',push_after INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0)")
@@ -67,12 +84,18 @@ internal class DeviceRegistry(private val ctx: Context,
             buildList { while(c.moveToNext()) add(listOf(c.getInt(0),c.getInt(1),c.getInt(2),c.getInt(3))) }
         }
         if (prior.filter {it[3]==1}.associate {it[1] to it[2]} == slots) return
+        val policies=slotPolicies(db,device)
+        val preferred=db.rawQuery("SELECT line_id FROM line_preferences WHERE name='default'",null).use { if(it.moveToFirst())it.getString(0) else null }
         db.execSQL("UPDATE lines SET present=0 WHERE device=? AND present=1",arrayOf(device))
         for ((slot,sub) in slots) {
+            // Brief absence is common during modem startup. Revoke approval only when
+            // a different subscription occupies the slot, or this one moves slots.
+            db.execSQL("UPDATE lines SET confirmed=0 WHERE device=? AND slot=? AND sub<>? AND confirmed=1",
+                arrayOf(device,slot,sub))
             val existing = prior.firstOrNull { it[2]==sub }
             if (existing != null) {
-                db.execSQL("UPDATE lines SET present=1,confirmed=CASE WHEN slot=? AND ?=1 THEN confirmed ELSE 0 END,slot=? WHERE device=? AND sub=?",
-                    arrayOf(slot,existing[3],slot,device,sub))
+                db.execSQL("UPDATE lines SET present=1,confirmed=CASE WHEN slot=? THEN confirmed ELSE 0 END,slot=? WHERE device=? AND sub=?",
+                    arrayOf(slot,slot,device,sub))
             } else {
                 val oldSlot=prior.any { it[1]==slot }
                 val legacyAlias=when {
@@ -86,6 +109,16 @@ internal class DeviceRegistry(private val ctx: Context,
                 db.execSQL("INSERT INTO lines(line_id,alias,device,slot,sub,name,present,confirmed) VALUES(?,?,?,?,?,?,1,?)",
                     arrayOf(UUID.randomUUID().toString(),alias,device,slot,sub,name,if(oldSlot)0 else 1))
             }
+        }
+        for(policy in policies) {
+            val sub=slots[policy.slot] ?: continue
+            val line=db.rawQuery("SELECT line_id FROM lines WHERE device=? AND sub=? AND present=1",arrayOf(device,sub.toString())).use {
+                check(it.moveToFirst());it.getString(0)
+            }
+            db.execSQL("UPDATE lines SET name=?,enabled=?,sort_order=?,confirmed=1 WHERE line_id=?",
+                arrayOf(policy.name,policy.enabled,policy.sort,line))
+            db.execSQL("UPDATE line_preferences SET line_id=? WHERE name=?",arrayOf(line,"takeover:$device:${policy.slot}"))
+            if(preferred==policy.lineId)db.execSQL("UPDATE line_preferences SET line_id=? WHERE name='default'",arrayOf(line))
         }
     }
 
@@ -115,7 +148,7 @@ internal class DeviceRegistry(private val ctx: Context,
     }
 
     fun lines(db:SQLiteDatabase):List<Map<String,Any>> = db.rawQuery(
-        "SELECT l.alias,l.line_id,l.device,d.label,l.slot,l.sub,l.name,l.present,l.confirmed,d.sms_send,l.enabled,l.sort_order,EXISTS(SELECT 1 FROM line_preferences p WHERE p.name='default' AND p.line_id=l.line_id) FROM lines l JOIN devices d ON d.device=l.device WHERE d.revoked=0 OR EXISTS(SELECT 1 FROM line_preferences p WHERE p.name='default' AND p.line_id=l.line_id) ORDER BY l.sort_order,d.rowid,l.slot,l.alias",null
+        "SELECT l.alias,l.line_id,l.device,d.label,l.slot,l.sub,l.name,l.present,l.confirmed,d.sms_send,l.enabled,l.sort_order,EXISTS(SELECT 1 FROM line_preferences p WHERE p.name='default' AND p.line_id=l.line_id),EXISTS(SELECT 1 FROM line_preferences p WHERE p.name='takeover:' || l.device || ':' || l.slot) FROM lines l JOIN devices d ON d.device=l.device WHERE d.revoked=0 OR EXISTS(SELECT 1 FROM line_preferences p WHERE p.name='default' AND p.line_id=l.line_id) ORDER BY l.sort_order,d.rowid,l.slot,l.alias",null
     ).use{ c-> buildList {while(c.moveToNext()){
         val device=c.getString(2)
         val confirmed=c.getInt(8)!=0
@@ -126,7 +159,7 @@ internal class DeviceRegistry(private val ctx: Context,
         add(mapOf("id" to c.getInt(0),"lineId" to c.getString(1),"phoneId" to device,"deviceId" to device,"phoneName" to c.getString(3),
             "slot" to c.getInt(4),"subscriptionId" to c.getInt(5),"simName" to c.getString(6),"name" to name,
             "deviceOnline" to online(device),"lineOnline" to lineOnline,"enabled" to enabled,"sortOrder" to c.getInt(11),"isDefault" to (c.getInt(12)!=0),
-            "confirmed" to confirmed,"present" to (c.getInt(7)!=0),"online" to available,"smsAvailable" to available,"voiceAvailable" to false))
+            "followSlot" to (c.getInt(13)!=0),"confirmed" to confirmed,"present" to (c.getInt(7)!=0),"online" to available,"smsAvailable" to available,"voiceAvailable" to false))
     }} }
 
     companion object {

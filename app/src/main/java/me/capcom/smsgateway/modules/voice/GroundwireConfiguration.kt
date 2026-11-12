@@ -33,9 +33,13 @@ class GroundwireConfiguration(context:Context,preferencesName:String="commlink-g
             require(routes.map{it.lineId}.distinct().size==routes.size && routes.map{it.prefix}.distinct().size==routes.size){"线路和拨号前缀不能重复"}
             return routes
         }
-        fun matches(route:GroundwireRoute,row:Map<String,Any>) = row["lineId"]==route.lineId &&
+        fun matchesBinding(route:GroundwireRoute,row:Map<String,Any>) =
             row["deviceId"]==route.deviceId && (row["slot"] as? Number)?.toInt()==route.slot &&
-            (row["subscriptionId"] as? Number)?.toInt()==route.subscriptionId &&
-            row["lineOnline"]==true && row["present"]==true && row["confirmed"]==true && row["enabled"]==true
+                (row["followSlot"]==true || (row["lineId"]==route.lineId &&
+                    (row["subscriptionId"] as? Number)?.toInt()==route.subscriptionId)) &&
+                row["present"]==true && row["confirmed"]==true
+
+        fun matches(route:GroundwireRoute,row:Map<String,Any>) =
+            matchesBinding(route,row) && row["lineOnline"]==true && row["enabled"]==true
     }
 }

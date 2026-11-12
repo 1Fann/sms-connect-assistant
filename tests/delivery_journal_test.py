@@ -32,6 +32,47 @@ class PeerPresenceWriteTest(unittest.TestCase):
             self.assertEqual(sync(90_000,model='',sms_send=0),1) # Wall-clock correction.
             self.assertEqual(db.execute("SELECT last_seen,model,sms_send FROM devices").fetchone(),(90_000,'test',0))
 
+class SimConfirmationTest(unittest.TestCase):
+    def test_same_subscription_returns_while_replacement_or_move_requires_review(self):
+        registry=(SRC/'modules/iphone/DeviceRegistry.kt').read_text(encoding='utf-8')
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.execute(sql(registry,'CREATE TABLE lines('))
+            db.execute("INSERT INTO lines(line_id,alias,device,slot,sub,name,present,confirmed) VALUES('a',1,'peer',1,4,'SIM',1,1)")
+            absent=sql(registry,'UPDATE lines SET present=0')
+            changed=sql(registry,'UPDATE lines SET confirmed=0 WHERE device=')
+            present=sql(registry,'UPDATE lines SET present=1,confirmed=')
+            def restore(slot,sub):
+                db.execute(changed,('peer',slot,sub))
+                db.execute(present,(slot,slot,'peer',sub))
+            def state():
+                return db.execute("SELECT present,confirmed FROM lines WHERE line_id='a'").fetchone()
+            db.execute(absent,('peer',))
+            self.assertEqual(state(),(0,1))
+            restore(1,4)
+            self.assertEqual(state(),(1,1))
+            db.execute(absent,('peer',))
+            db.execute(changed,('peer',1,5))
+            restore(1,4)
+            self.assertEqual(state(),(1,0))
+            db.execute("UPDATE lines SET confirmed=1 WHERE line_id='a'")
+            restore(2,4)
+            self.assertEqual(state(),(1,0))
+
+    def test_takeover_uses_new_subscription_without_rebinding_queued_requests(self):
+        registry=(SRC/'modules/iphone/DeviceRegistry.kt').read_text(encoding='utf-8')
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.execute(sql(registry,'CREATE TABLE lines('))
+            db.execute(sql(registry,'CREATE TABLE line_preferences('))
+            db.execute(sql(registry,'CREATE TABLE sms_bindings('))
+            db.executemany("INSERT INTO lines VALUES(?,?,?,?,?,?,?,?,?,?)",[
+                ('old',1,'peer',2,4,'work',0,0,1,7),('replacement',2,'peer',2,8,'generic',1,0,1,0)])
+            db.execute("INSERT INTO line_preferences VALUES('takeover:peer:2','old')")
+            db.execute("INSERT INTO sms_bindings VALUES('queued',2,4)")
+            db.execute(sql(registry,'UPDATE lines SET name=?,enabled=?,sort_order=?,confirmed=1'),('work',1,7,'replacement'))
+            db.execute(sql(registry,'UPDATE line_preferences SET line_id=? WHERE name=?'),('replacement','takeover:peer:2'))
+            self.assertEqual(db.execute("SELECT sub,name,confirmed,sort_order FROM lines WHERE present=1").fetchone(),(8,'work',1,7))
+            self.assertEqual(db.execute("SELECT slot,sub FROM sms_bindings WHERE request_id='queued'").fetchone(),(2,4))
+
 class DeliveryJournalTest(unittest.TestCase):
     def hub(self, seed=None):
         db=sqlite3.connect(':memory:')

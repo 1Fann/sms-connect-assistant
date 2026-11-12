@@ -22,7 +22,7 @@ export async function request<T>(path:string,body?:unknown,method=body===undefin
 export const api=<T,>(path:string,body?:unknown)=>request<T>('v2/'+path,body);
 export type Session={installationId:string,permissions:string[]};
 export type Device={deviceId:string,name:string,online:boolean,contactsWrite?:boolean};
-export type Line={lineId:string,deviceId:string,name:string,slot:number,lineOnline?:boolean,confirmed:boolean,online:boolean,present?:boolean,enabled?:boolean,deviceOnline?:boolean};
+export type Line={lineId:string,followSlot?:boolean,deviceId:string,name:string,slot:number,lineOnline?:boolean,confirmed:boolean,online:boolean,present?:boolean,enabled?:boolean,deviceOnline?:boolean};
 export type ContactSource={deviceId:string,rawId:string,contactId:string,revision:string|number,name:string,numbers:string[],readOnly:boolean};
 export type Contact={id:string,name:string,numbers:string[],revision:number,favorite:boolean,conflict:boolean,sources:ContactSource[],deviceId?:string,nativeContactId?:string,primaryRawId?:string,photo?:string};
 export type CallRecord={id:string,deviceId?:string,number:string,name?:string,date:number,duration:number,type:string,accountId?:string,slot?:number|null};

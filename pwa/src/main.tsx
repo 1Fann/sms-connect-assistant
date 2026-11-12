@@ -94,7 +94,7 @@ function App(){
   if(!older)firstLoad.current=null;
   const epoch=generation.current;
   const simTask=api<SimLine[]>('sims').then(lines=>{
-   setSims(lines);setSim(prev=>prev || preferredSmsLine(lines,localStorage.getItem('sms.last-line')));
+   setSims(lines);setSim(prev=>{const old=lines.find(l=>l.lineId===prev);return old?lineKey(old):prev||preferredSmsLine(lines,localStorage.getItem('sms.last-line'))});
   });
   const phonesTask=api<Phone[]>('phones').then(setPhones);
   const metadataTask=(initial?.metadata??api<ConversationState[]>('conversations')).then(result=>{if(epoch===generation.current&&!mutation.current&&!metadataWrites.current){if(!Array.isArray(result))throw Error('会话状态暂不可用，请更新安卓应用后重试');setConversationStates(prev=>reuseRecords(prev,result));setMetadataReady(true)}});
@@ -201,7 +201,7 @@ function App(){
   if(sending.current)return;
   const address=active||identity(recipient,region);
   if(!existing&&(!draft.trim()||!address||!sim))return;
-  const selected=sims.find(s=>existing?(existing.lineId?s.lineId===existing.lineId:s.id===existing.sim):String(s.lineId||s.id)===sim);
+  const selected=sims.find(s=>existing?(existing.lineId?s.lineId===existing.lineId:s.id===existing.sim):isPresentSim(s)&&lineKey(s)===sim);
   if(!selected||!canSendOn(selected)){setError('所选手机或 SIM 卡离线，请选择可用线路');return}
   const m:Sms=existing||{id:crypto.randomUUID(),address,body:draft,date:Date.now(),incoming:false,read:true,sim:selected.id,lineId:selected.lineId,state:'local'};
   if(!existing){localStorage.setItem('sms.last-line',lineKey(selected));setOutgoing(p=>[...p,m]);setDraft('');setActive(address);setScreen('chat')}
@@ -340,7 +340,7 @@ function App(){
    <div ref={end}/>
   </section>
   <form className="composer" ref={composer} onSubmit={e=>{e.preventDefault();nearBottom.current=true;void send()}}>
-   <label className="sim-control">发送线路 <select aria-label="发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!selectedLine&&<option value={sim} disabled>{sim?'原线路不可用':presentLines.length?'请选择发送线路':'无可用 SIM'}</option>}{presentLines.map(s=><option value={s.lineId||s.id} key={s.id} disabled={!canSendOn(s)}>{lineOptionName(s)}</option>)}</select></label>
+   <label className="sim-control">发送线路 <select aria-label="发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!selectedLine&&<option value={sim} disabled>{sim?'原线路不可用':presentLines.length?'请选择发送线路':'无可用 SIM'}</option>}{presentLines.map(s=><option value={lineKey(s)} key={s.id} disabled={!canSendOn(s)}>{lineOptionName(s)}</option>)}</select></label>
    {draft.length>2000&&<p className="draft-limit">超过 2000 字，请删减后发送（当前 {draft.length} 字）</p>}<div className="composer-row"><button type="button" className="glass circle options-button" aria-label="短信选项" onClick={()=>setSheet(true)}><Icon name="plus"/></button><div className="input-capsule glass"><textarea ref={textarea} aria-label="短信内容" rows={1} placeholder={'短信 · '+(selectedLine?.name||'SMS')} onPointerDown={e=>{if(e.pointerType==='touch'&&document.activeElement!==e.currentTarget)e.currentTarget.focus({preventScroll:true})}} value={draft} maxLength={2000} onChange={e=>setDraft(e.target.value)}/><button aria-label="发送短信" className="send" disabled={busy||!draft.trim()||draft.length>2000||(!selectedLine||!canSendOn(selectedLine))||(screen==='new'&&!recipient.trim())}><Icon name="send" size={24}/></button></div></div>
   </form>
  </div>}
@@ -375,7 +375,7 @@ function App(){
  </dialog>
  <dialog ref={dialog} className="options-sheet" {...optionsMotion}>
   <div className="sheet-content"><button className="sheet-close circle" aria-label="关闭短信选项" onClick={()=>setSheet(false)}><Icon name="close" size={20}/></button><Avatar name={current.find(m=>m.name)?.name} large/><h2>{screen==='chat'?title:'短信选项'}</h2>
-  {screen==='chat'&&<p>{formatPhone(active||'',region)}</p>}<label className="sheet-line">发送线路<select aria-label="选项中的发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!selectedLine&&<option value={sim} disabled>{sim?'原线路不可用':presentLines.length?'请选择发送线路':'无可用 SIM'}</option>}{presentLines.map(s=><option value={s.lineId||s.id} key={s.id} disabled={!canSendOn(s)}>{lineOptionName(s)}</option>)}</select></label>{screen==='chat'&&<><div className="sheet-line alert-toggle"><span>隐藏提醒</span><button type="button" className="ios-switch" role="switch" aria-label="隐藏提醒" aria-checked={!!meta.get(active!)?.muted} disabled={busy} onClick={()=>void act([active!],meta.get(active!)?.muted?'unmute':'mute')}><span/></button></div><p className="mute-note">只停止此对话在助手中的 iPhone 推送，短信仍会正常接收。安卓本机通知不受影响。</p>{error&&<p className="dialog-error">{error}</p>}</>}<p className="sheet-note">通过 Android 手机发送文字短信。附件、iMessage 与语音暂不支持。</p><button className="primary" onClick={()=>setSheet(false)}>完成</button></div>
+  {screen==='chat'&&<p>{formatPhone(active||'',region)}</p>}<label className="sheet-line">发送线路<select aria-label="选项中的发送线路" value={sim} onChange={e=>setSim(e.target.value)}>{!selectedLine&&<option value={sim} disabled>{sim?'原线路不可用':presentLines.length?'请选择发送线路':'无可用 SIM'}</option>}{presentLines.map(s=><option value={lineKey(s)} key={s.id} disabled={!canSendOn(s)}>{lineOptionName(s)}</option>)}</select></label>{screen==='chat'&&<><div className="sheet-line alert-toggle"><span>隐藏提醒</span><button type="button" className="ios-switch" role="switch" aria-label="隐藏提醒" aria-checked={!!meta.get(active!)?.muted} disabled={busy} onClick={()=>void act([active!],meta.get(active!)?.muted?'unmute':'mute')}><span/></button></div><p className="mute-note">只停止此对话在助手中的 iPhone 推送，短信仍会正常接收。安卓本机通知不受影响。</p>{error&&<p className="dialog-error">{error}</p>}</>}<p className="sheet-note">通过 Android 手机发送文字短信。附件、iMessage 与语音暂不支持。</p><button className="primary" onClick={()=>setSheet(false)}>完成</button></div>
  </dialog>
  </>}{error&&<div role="alert" className="error"><span>{error}</span><button aria-label="关闭提示" onClick={()=>setError('')}><Icon name="close" size={18}/></button></div>}
  </main>

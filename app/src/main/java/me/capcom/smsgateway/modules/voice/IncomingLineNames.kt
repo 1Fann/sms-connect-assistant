@@ -9,10 +9,7 @@ import java.io.File
 object IncomingLineNames {
     fun names(lines: List<Map<String,Any>>, routes: List<GroundwireRoute>): Map<String,Map<String,String>> =
         routes.mapNotNull { route ->
-            val row = lines.singleOrNull { it["lineId"] == route.lineId && it["deviceId"] == route.deviceId &&
-                (it["slot"] as? Number)?.toInt() == route.slot &&
-                (it["subscriptionId"] as? Number)?.toInt() == route.subscriptionId &&
-                it["present"] == true && it["confirmed"] == true } ?: return@mapNotNull null
+            val row = lines.singleOrNull { GroundwireConfiguration.matchesBinding(route,it) } ?: return@mapNotNull null
             route.prefix to mapOf("phone" to row["phoneName"].toString(), "sim" to row["simName"].toString())
         }.toMap()
 

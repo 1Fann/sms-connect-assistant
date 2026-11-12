@@ -67,11 +67,18 @@ class PeerSetupActivity : Activity() {
                     val makeDefault=if(line["isDefault"]==true)"取消默认" else "设为默认"
                     val absent=lines.filter { it["present"]==false && it["lineId"]!=id }
                     val actions=mutableListOf(makeDefault,"移到首位",enable)
+                    val policyOption=if(line["present"]==true)actions.size else -1
+                    if(policyOption>=0)actions.add(if(line["followSlot"]==true)"关闭按卡槽自动接管" else "按卡槽自动接管")
                     if(line["present"]==true && line["deviceOnline"]==true && absent.isNotEmpty())actions.add("这是原有 SIM，关联旧线路")
                     AlertDialog.Builder(this).setTitle(label).setItems(actions.toTypedArray()){_,which->
                         if(which<3) {
                             hub.configureLine(id,listOf(if(line["isDefault"]==true)"no-default" else "default","first",if(line["enabled"]==true)"disable" else "enable")[which])
                             recreate()
+                        } else if(which==policyOption) {
+                            if(line["followSlot"]==true){hub.configureLine(id,"confirm-sim");recreate()}
+                            else AlertDialog.Builder(this).setMessage("开启后，这个卡槽换入的新 SIM 会自动用于短信和拨号。已排队短信仍绑定原 SIM。")
+                                .setPositiveButton("开启自动接管"){_,_->hub.configureLine(id,"follow-slot");recreate()}
+                                .setNegativeButton("取消",null).show()
                         } else {
                             AlertDialog.Builder(this).setTitle("选择已经移出的原线路").setItems(absent.map{it["name"].toString()}.toTypedArray()){_,pos->
                                 val old=absent[pos]

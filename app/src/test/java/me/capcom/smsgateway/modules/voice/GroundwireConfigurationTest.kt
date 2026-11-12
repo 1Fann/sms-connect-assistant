@@ -20,4 +20,17 @@ class GroundwireConfigurationTest {
             assertTrue(runCatching{GroundwireConfiguration.parse(value)}.isFailure)
         assertEquals(2,GroundwireConfiguration.parse("a server 1 9 *81*\nb server 2 10 *82*").size)
     }
+
+    @Test fun replacementMatchesOnlyTheOptedInDeviceAndSlot() {
+        val route=GroundwireRoute("original","peer",2,47,"*84*")
+        val replacement=mapOf("lineId" to "new","deviceId" to "peer","slot" to 2,
+            "subscriptionId" to 48,"present" to true,"confirmed" to true,"enabled" to true,"lineOnline" to true)
+        assertFalse(GroundwireConfiguration.matches(route,replacement))
+        val optedIn=replacement+("followSlot" to true)
+        assertTrue(GroundwireConfiguration.matches(route,optedIn))
+        for(change in listOf("deviceId" to "other","slot" to 1,"enabled" to false,
+            "confirmed" to false,"present" to false,"lineOnline" to false)) {
+            assertFalse(GroundwireConfiguration.matches(route,optedIn+change))
+        }
+    }
 }

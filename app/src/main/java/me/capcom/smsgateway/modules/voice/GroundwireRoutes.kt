@@ -12,10 +12,7 @@ fun Route.groundwireRoutes(context:Context,owner:(ApplicationCall)->String,
     deviceAllowed:(ApplicationCall,String)->Boolean) {
     get("groundwire/routes") {
         if(!requireScope(call,"calls.dial"))return@get
-        val config=GroundwireConfiguration(context)
-        val live=lines().associateBy{it["lineId"]}
-        val routes=config.routes().filter{deviceAllowed(call,it.deviceId) && live[it.lineId]?.let{row->GroundwireConfiguration.matches(it,row)}==true}
-        call.respond(mapOf("routes" to routes.map{mapOf("lineId" to it.lineId,"prefix" to it.prefix)}))
+        call.respond(mapOf("routes" to availableGroundwireRoutes(context,lines()) { deviceAllowed(call,it) }))
     }
     // Read-only archive from older browser calling releases. Never creates a controller or migrates data.
     get("voice/history") {
@@ -39,3 +36,9 @@ fun Route.groundwireRoutes(context:Context,owner:(ApplicationCall)->String,
     get("calls/{id}/state"){call.retired()}
     post("calls/{id}/{action}"){call.retired()}
 }
+
+internal fun availableGroundwireRoutes(context:Context,lines:List<Map<String,Any>>,allowed:(String)->Boolean):List<Map<String,String>> =
+    GroundwireConfiguration(context).routes().filter { allowed(it.deviceId) }.mapNotNull { route ->
+        val row=lines.singleOrNull { GroundwireConfiguration.matches(route,it) } ?: return@mapNotNull null
+        mapOf("lineId" to row["lineId"].toString(),"prefix" to route.prefix)
+    }.groupBy { it.getValue("lineId") }.values.mapNotNull { it.singleOrNull() }

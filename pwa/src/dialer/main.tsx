@@ -10,8 +10,9 @@ import {useViewport} from '../viewport';
 import {useContactEditorDock} from './contactEditorViewport';
 import {useMissedBadge} from './missedBadge';
 import {isPresentSim,lineStatus} from '../lines';
+import type {NativeRoute} from './groundwire';
 
-type Startup = {session:Session, devices:Device[], lines:Line[]};
+type Startup = {session:Session, devices:Device[], lines:Line[], routes?:NativeRoute[]};
 async function loadStartup():Promise<Startup>{
  try{return await api<Startup>('startup')}
  catch(e){
@@ -35,12 +36,12 @@ function App(){
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
  const [tab,setTab]=useState(()=>location.hash==='#missed'?'最近通话':'拨号键盘'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');
  const [lineHint,hint]=useState({id:'',seq:0}),[order,setOrder]=useState<string[]>(()=>{try{const v=JSON.parse(localStorage.getItem('phone.order')||'[]');return Array.isArray(v)?v:[]}catch{return []}});
- const [connectionFailed,setConnectionFailed]=useState(false);
+ const [connectionFailed,setConnectionFailed]=useState(false),[routes,setRoutes]=useState<NativeRoute[]|undefined>();
  async function boot(){
   setLoading(true);setConnectionFailed(false);
   try{
    const data=await loadStartup();
-   setDevices(data.devices);setLines(data.lines);setSession(data.session);setMessage('');
+   setDevices(data.devices);setLines(data.lines);setRoutes(data.routes);setSession(data.session);setMessage('');
   }catch(e){
    setSession(null);
    if(!(e instanceof PhoneError&&e.status===401)){setConnectionFailed(true);setMessage(err(e))}
@@ -58,7 +59,7 @@ function App(){
   const load=async()=>{
    if(document.hidden||running)return;
    running=true;
-   try{const data=await loadStartup();if(active){setDevices(data.devices);setLines(data.lines)}}
+   try{const data=await loadStartup();if(active){setDevices(data.devices);setLines(data.lines);setRoutes(data.routes)}}
    catch(e){if(active){if(e instanceof PhoneError&&e.status===401)setSession(null);setMessage(err(e))}}
    finally{running=false}
   };
@@ -81,7 +82,7 @@ function App(){
    {!waiting&&!loading&&!connectionFailed&&<form onSubmit={async e=>{e.preventDefault();try{await request('pair',{code});setCode('');wait(true);setMessage('')}catch(ex){setMessage(err(ex))}}}><input required aria-label="配对码" autoCapitalize="none" autoComplete="off" value={code} onChange={e=>setCode(e.target.value.trim())}/><button className="primary">请求配对</button></form>}{message&&<p role="alert">{message}</p>}</main>;
  const can=(p:string)=>session.permissions.includes(p);
  return <><main id="phone-app" className={'phone-app'+(searching?' searching':'')+(tab==='设置'?' settings-page':'')} key={session.installationId}>{message&&<p role="status">{message}</p>}
-   <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint} openSettings={()=>switchTab('设置')}/></div>
+   <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} liveRoutes={routes} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint} openSettings={()=>switchTab('设置')}/></div>
    {tab==='最近通话'&&(can('calls.read')?<Recent canAddContacts={can('contacts.read')&&can('contacts.write')} devices={devices} dial={dial} installation={session.installationId} searching={searching} query={query} settings={()=>switchTab('设置')} contacts={()=>switchTab('个人收藏')} onSeen={missed.viewed}/>:<p>此安装未获通话记录授权</p>)}
    {(tab==='通讯录'||tab==='个人收藏')&&(can('contacts.read')?<Directory key={tab+directoryVisit} devices={devices} lines={sorted} canEdit={can('contacts.write')} favorites={tab==='个人收藏'} searchQuery={query} settings={()=>switchTab('设置')} allContacts={()=>switchTab(tab==='个人收藏'?'通讯录':'个人收藏')} dial={dial}/>:<p>此安装未获通讯录读取授权</p>)}
    {tab==='设置'&&<><header className="phone-toolbar"><button className="glass-circle" aria-label="返回通话" onClick={()=>switchTab('最近通话')}><PhoneIcon name="back"/></button><h1>互联设置</h1><span className="toolbar-spacer"/></header><h2>设备与线路</h2>{devices.map(d=><section key={d.deviceId} className="card"><b>{d.name}</b><small>{d.online?'在线':'离线'}</small>{sorted.filter(l=>l.deviceId===d.deviceId).map(l=><div className="row" key={l.lineId}>{l.name}<span>{lineStatus({...l,online:l.lineOnline??l.online})||'可用'}</span><button onClick={()=>{const v=[l.lineId,...sorted.map(x=>x.lineId).filter(id=>id!==l.lineId)];setOrder(v);localStorage.setItem('phone.order',JSON.stringify(v))}}>排在首位</button></div>)}</section>)}

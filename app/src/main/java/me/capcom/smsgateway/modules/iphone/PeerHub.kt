@@ -204,6 +204,10 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
             "enable","disable" -> db.execSQL("UPDATE lines SET enabled=? WHERE line_id=?",arrayOf(if(action=="enable")1 else 0,lineId))
             "first" -> db.execSQL("UPDATE lines SET sort_order=(SELECT min(sort_order)-1 FROM lines) WHERE line_id=?",arrayOf(lineId))
             "confirm" -> {require(target["present"]==true);confirmLine(lineId)}
+            "follow-slot","confirm-sim" -> {
+                require(target["present"]==true)
+                registry.setSlotTakeover(db,target["deviceId"] as String,target["slot"] as Int,lineId,action=="follow-slot")
+            }
             else -> throw IllegalArgumentException("未知线路操作")
         }
     }

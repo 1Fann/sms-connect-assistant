@@ -119,11 +119,16 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
                             }
                             get("startup") {
                                 val grant=owner(call)
+                                val devices=visibleDevices(call)
+                                val allowed=devices.map { it["deviceId"] }.toSet()
+                                val lines=hub.allLines().filter { it["deviceId"] in allowed }
                                 call.respond(mapOf(
                                     "session" to mapOf("installationId" to grant.installation,
                                         "permissions" to grant.grants.split(',').filterNot { it.startsWith("device:") }),
-                                    "devices" to visibleDevices(call),
-                                    "lines" to visibleLines(call)
+                                    "devices" to devices,
+                                    "lines" to lines.map { it-"subscriptionId" },
+                                    "routes" to if(grant.allows("calls.dial"))
+                                        availableGroundwireRoutes(androidContext,lines) { it in allowed } else emptyList()
                                 ))
                             }
                             get("devices") { call.respond(visibleDevices(call)) }
@@ -172,7 +177,7 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
         }
     }
     private fun visibleDevices(call: ApplicationCall) =
-        hub.devices().filter { deviceAllowed(call,it["deviceId"].toString()) }.map {
+        hub.devices().filter { owner(call).allows("device:"+it["deviceId"]) }.map {
             it+("contactsWrite" to directory.deviceAccess(it["deviceId"].toString()).optBoolean("contactsWrite"))
         }
 

@@ -11,6 +11,15 @@ import {useContactEditorDock} from './contactEditorViewport';
 import {useMissedBadge} from './missedBadge';
 import {isPresentSim,lineStatus} from '../lines';
 
+type Startup = {session:Session, devices:Device[], lines:Line[]};
+async function loadStartup():Promise<Startup>{
+ try{return await api<Startup>('startup')}
+ catch(e){
+  if(!(e instanceof PhoneError&&e.status===404))throw e;
+  const [session,devices,lines]=await Promise.all([api<Session>('session'),api<Device[]>('devices'),api<Line[]>('lines')]);
+  return {session,devices,lines};
+ }
+}
 async function enablePush(){
  if(!('serviceWorker' in navigator)||!('Notification' in window))throw Error('请从 iPhone 主屏幕打开互联电话');
  if(await Notification.requestPermission()!=='granted')throw Error('系统未允许通知');
@@ -26,14 +35,37 @@ function App(){
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
  const [tab,setTab]=useState(()=>location.hash==='#missed'?'最近通话':'拨号键盘'),[devices,setDevices]=useState<Device[]>([]),[lines,setLines]=useState<Line[]>([]),[number,setNumber]=useState('');
  const [lineHint,hint]=useState({id:'',seq:0}),[order,setOrder]=useState<string[]>(()=>{try{const v=JSON.parse(localStorage.getItem('phone.order')||'[]');return Array.isArray(v)?v:[]}catch{return []}});
- async function boot(){try{setSession(await api<Session>('session'));setMessage('')}catch(e){if(!(e instanceof PhoneError&&e.status===401))setMessage(err(e));setSession(null)}finally{setLoading(false)}}
+ const [connectionFailed,setConnectionFailed]=useState(false);
+ async function boot(){
+  setLoading(true);setConnectionFailed(false);
+  try{
+   const data=await loadStartup();
+   setDevices(data.devices);setLines(data.lines);setSession(data.session);setMessage('');
+  }catch(e){
+   setSession(null);
+   if(!(e instanceof PhoneError&&e.status===401)){setConnectionFailed(true);setMessage(err(e))}
+  }finally{setLoading(false)}
+ }
  useEffect(()=>{void boot()},[]);
  useEffect(()=>{if(!waiting)return;let active=true,running=false;
    const t=setInterval(async()=>{if(running)return;running=true;try{const r=await request<{status:string}>('pair/finish',{});if(active&&r.status==='ok'){wait(false);await boot()}}catch(e){if(active){wait(false);setMessage(err(e))}}finally{running=false}},1800);
    const end=setTimeout(()=>{wait(false);setMessage('配对已过期，请在安卓生成新配对码')},180000);
    return()=>{active=false;clearInterval(t);clearTimeout(end)};
  },[waiting]);
- useEffect(()=>{if(!session)return;let active=true;const load=async()=>{if(document.hidden)return;try{const [ds,ls]=await Promise.all([api<Device[]>('devices'),api<Line[]>('lines')]);if(active){setDevices(ds);setLines(ls)}}catch(e){if(active){if(e instanceof PhoneError&&e.status===401)setSession(null);setMessage(err(e))}}};void load();const t=setInterval(load,8000);return()=>{active=false;clearInterval(t)}},[session]);
+ useEffect(()=>{
+  if(!session)return;
+  let active=true,running=false;
+  const load=async()=>{
+   if(document.hidden||running)return;
+   running=true;
+   try{const data=await loadStartup();if(active){setDevices(data.devices);setLines(data.lines)}}
+   catch(e){if(active){if(e instanceof PhoneError&&e.status===401)setSession(null);setMessage(err(e))}}
+   finally{running=false}
+  };
+  const timer=setInterval(load,8000);
+  document.addEventListener('visibilitychange',load);
+  return()=>{active=false;clearInterval(timer);document.removeEventListener('visibilitychange',load)};
+ },[session]);
  useEffect(()=>{const f=()=>{if(location.hash==='#missed')setTab('最近通话')};window.addEventListener('hashchange',f);return()=>window.removeEventListener('hashchange',f)},[]);
  const [directoryVisit,setDirectoryVisit]=useState(0);
  const inDirectory=tab==='通讯录'||tab==='个人收藏';
@@ -44,8 +76,9 @@ function App(){
  function dial(n:string,id=''){setNumber(n);if(id)hint(v=>({id,seq:v.seq+1}));switchTab('拨号键盘')}
  const sorted=lines.filter(isPresentSim).sort((a,b)=>(order.indexOf(a.lineId)+1||99999)-(order.indexOf(b.lineId)+1||99999));
  const missed=useMissedBadge(session?.installationId,session?.permissions.includes('calls.read')===true);
- if(!session)return <main className="pair"><img src="/phone/icon-192.png" width="80" alt=""/><h1>互联电话</h1><p>{loading?'连接中…':waiting?'请在安卓主机上确认设备和权限':'输入安卓主机生成的三分钟配对码'}</p>
-   {!waiting&&!loading&&<form onSubmit={async e=>{e.preventDefault();try{await request('pair',{code});setCode('');wait(true);setMessage('')}catch(ex){setMessage(err(ex))}}}><input required aria-label="配对码" autoCapitalize="none" autoComplete="off" value={code} onChange={e=>setCode(e.target.value.trim())}/><button className="primary">请求配对</button></form>}{message&&<p role="alert">{message}</p>}</main>;
+ if(!session)return <main className="pair"><img src="/phone/icon-192.png" width="80" alt=""/><h1>互联电话</h1><p>{loading?'连接中…':waiting?'请在安卓主机上确认设备和权限':connectionFailed?'暂时无法连接安卓主机':'输入安卓主机生成的三分钟配对码'}</p>
+   {connectionFailed&&!loading&&<button className="primary" onClick={()=>void boot()}>重新连接</button>}
+   {!waiting&&!loading&&!connectionFailed&&<form onSubmit={async e=>{e.preventDefault();try{await request('pair',{code});setCode('');wait(true);setMessage('')}catch(ex){setMessage(err(ex))}}}><input required aria-label="配对码" autoCapitalize="none" autoComplete="off" value={code} onChange={e=>setCode(e.target.value.trim())}/><button className="primary">请求配对</button></form>}{message&&<p role="alert">{message}</p>}</main>;
  const can=(p:string)=>session.permissions.includes(p);
  return <><main id="phone-app" className={'phone-app'+(searching?' searching':'')+(tab==='设置'?' settings-page':'')} key={session.installationId}>{message&&<p role="status">{message}</p>}
    <div hidden={tab!=='拨号键盘'}><Calling lines={sorted} number={number} setNumber={setNumber} enabled={can('calls.dial')} lineHint={lineHint} openSettings={()=>switchTab('设置')}/></div>

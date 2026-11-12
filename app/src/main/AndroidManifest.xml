@@ -71,6 +71,7 @@
         <activity android:name=".modules.voice.VoiceSetupActivity" android:exported="false" />
         <activity android:name=".modules.iphone.PeerSetupActivity" android:exported="true" />
         <service android:name=".modules.iphone.IphoneService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+        <receiver android:name=".modules.iphone.RootRecoveryReceiver" android:exported="true" android:permission="android.permission.DUMP" />
 
         <receiver
             android:name=".modules.receiver.MessagesReceiver"

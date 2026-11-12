@@ -1,13 +1,17 @@
+import {takeStartupResponse} from '../startupRequest';
+
 export class PhoneError extends Error {
   constructor(public status:number,message:string){super(message)}
 }
 let rotation:Promise<boolean>|null=null;
 export async function request<T>(path:string,body?:unknown,method=body===undefined?'GET':'POST',retry=true):Promise<T>{
-  const response=await fetch('/api/'+path,{method,credentials:'same-origin',cache:'no-store',
+  const url='/api/'+path;
+  const early=method==='GET'&&retry?takeStartupResponse(url):undefined;
+  const response=await (early??fetch(url,{method,credentials:'same-origin',cache:'no-store',
     headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),
-    signal:AbortSignal.timeout(15000)});
+    signal:AbortSignal.timeout(15000)}));
   if(response.status===401 && retry && !['refresh','pair','pair/finish'].includes(path)){
-    rotation??=fetch('/api/refresh',{method:'POST',credentials:'same-origin',signal:AbortSignal.timeout(10000)}).then(r=>r.ok).catch(()=>false).finally(()=>{rotation=null});
+    rotation??=fetch('/api/refresh',{method:'POST',credentials:'same-origin',signal:AbortSignal.timeout(10000)}).then(r=>{if(!r.ok&&r.status!==401)throw new PhoneError(r.status,'暂时无法续期，请重试');return r.ok}).finally(()=>{rotation=null});
     if(await rotation)return request<T>(path,body,method,false);
   }
   const data=await response.json().catch(()=>({}));

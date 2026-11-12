@@ -1,21 +1,57 @@
-const cacheName='commlink-phone-shell-v2';
+// App-shell only. Never cache authenticated requests, SMS bodies or credentials.
+const CACHE = 'commlink-phone-shell-v3';
 const app='/phone/';
-const shell=[app,app+'manifest.webmanifest',app+'icon-192.png',app+'icon-512.png'];
-self.addEventListener('install',event=>event.waitUntil(caches.open(cacheName).then(cache=>cache.addAll(shell))));
-self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(
-  keys.filter(k=>k.startsWith('commlink-phone-shell-') && k!==cacheName).map(k=>caches.delete(k))
-))));
-self.addEventListener('fetch',event=>{
-  const url=new URL(event.request.url);
-  if(event.request.method!=='GET'||url.origin!==self.location.origin||!(shell.includes(url.pathname)||url.pathname.startsWith('/assets/')))return;
-  event.respondWith((async()=>{
-    const cache=await caches.open(cacheName);
+// Publish an updated shell only after its versioned entry chunks are available.
+async function refreshShell(request, cache) {
+  const response=await fetch(request);
+  if(response.ok) {
     try {
+      const html=await response.clone().text();
+      const assets=[...new Set([...html.matchAll(/(?:src|href)="(\/assets\/[^"]+\.(?:js|css))"/g)].map(m=>m[1]))];
+      await Promise.all(assets.map(async path=>{
+        const url=new URL(path,self.location.origin).href;
+        if(await cache.match(url))return;
+        const asset=await fetch(url);
+        if(!asset.ok)throw Error('Shell asset unavailable');
+        await cache.put(url,asset);
+      }));
+      await cache.put(new URL('/phone/',self.location.origin).href,response.clone());
+    } catch { /* Keep the previous complete shell when an update is interrupted. */ }
+  }
+  return response;
+}
+self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(c => Promise.all([
+  refreshShell(new URL('/phone/',self.location.origin).href,c),
+  c.addAll(['/phone/manifest.webmanifest','/phone/icon-192.png','/phone/icon-512.png'])
+]))));
+self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k=>k.startsWith('commlink-phone-shell-') && k!==CACHE).map(k=>caches.delete(k))))));
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if(url.origin !== self.location.origin || !(['/phone', '/phone/', '/phone/index.html', '/phone/manifest.webmanifest','/phone/icon-192.png','/phone/icon-512.png'].includes(url.pathname) || url.pathname.startsWith('/assets/')) || event.request.method !== 'GET') return;
+  if(url.pathname==='/phone/' || url.pathname==='/phone' || url.pathname==='/phone/index.html') {
+    const cache=caches.open(CACHE);
+    const update=cache.then(c=>refreshShell(event.request,c));
+    event.waitUntil(update.then(()=>{}).catch(()=>{}));
+    event.respondWith(cache.then(c=>c.match(new URL('/phone/',self.location.origin).href))
+      .then(cached=>cached || update).catch(()=>Response.error()));
+    return;
+  }
+  // Content-hashed assets have a new URL whenever their contents change.
+  if (/^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(url.pathname)) {
+    event.respondWith((async()=>{
+      const cache=await caches.open(CACHE);
+      const cached=await cache.match(event.request);
+      if(cached)return cached;
       const response=await fetch(event.request);
-      if(response.ok)await cache.put(event.request,response.clone());
+      if(response.ok)event.waitUntil(cache.put(event.request,response.clone()));
       return response;
-    } catch { return await cache.match(event.request)||Response.error() }
-  })());
+    })());
+    return;
+  }
+  event.respondWith(fetch(event.request).then(response=>{
+    if(response.ok) { const copy=response.clone(); event.waitUntil(caches.open(CACHE).then(c=>c.put(event.request,copy))); }
+    return response;
+  }).catch(()=>caches.open(CACHE).then(c=>c.match(event.request)).then(r=>r || Response.error())));
 });
 async function updateMissedBadge(){
   try {

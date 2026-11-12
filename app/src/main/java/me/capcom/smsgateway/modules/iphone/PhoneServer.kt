@@ -55,6 +55,7 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
                 sslConnector(keys,alias,{password},{password}) { this.host=bindAddress; this.port=this@PhoneServer.port }
                 module {
                     install(ContentNegotiation) { gson() }
+                    compressWebAssets()
                     install(StatusPages) {
                         exception<IllegalArgumentException> { call,_->call.respond(HttpStatusCode.BadRequest,mapOf("error" to "请求字段或当前操作无效")) }
                         exception<SecurityException> {call,_->call.respond(HttpStatusCode.Forbidden,mapOf("error" to "缺少设备或系统授权"))}
@@ -75,7 +76,7 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
                         call.response.header("X-Content-Type-Options","nosniff")
                         call.response.header("Strict-Transport-Security","max-age=31536000")
                         call.response.header("Permissions-Policy","microphone=(), camera=()")
-                        call.response.header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'none'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+                        call.response.header("Content-Security-Policy","default-src 'self'; script-src 'self' 'sha256-$WEB_STARTUP_SCRIPT_HASH'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'none'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
                         if(path.startsWith("/api/")) {
                             if(!limit.allow()){call.respond(HttpStatusCode.TooManyRequests);finish();return@intercept}
                             if(path !in setOf("/api/pair","/api/pair/finish","/api/refresh")){
@@ -116,10 +117,17 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
                                 val grant=owner(call)
                                 call.respond(mapOf("installationId" to grant.installation,"permissions" to grant.grants.split(',').filterNot { it.startsWith("device:") }))
                             }
-                            get("devices") {call.respond(hub.devices().filter {deviceAllowed(call,it["deviceId"].toString())}.map {
-                                it+("contactsWrite" to directory.deviceAccess(it["deviceId"].toString()).optBoolean("contactsWrite"))
-                            })}
-                            get("lines") {call.respond(hub.allLines().filter { deviceAllowed(call,it["deviceId"].toString()) }.map { it-"subscriptionId" })}
+                            get("startup") {
+                                val grant=owner(call)
+                                call.respond(mapOf(
+                                    "session" to mapOf("installationId" to grant.installation,
+                                        "permissions" to grant.grants.split(',').filterNot { it.startsWith("device:") }),
+                                    "devices" to visibleDevices(call),
+                                    "lines" to visibleLines(call)
+                                ))
+                            }
+                            get("devices") { call.respond(visibleDevices(call)) }
+                            get("lines") { call.respond(visibleLines(call)) }
                             get("push/key"){call.respond(mapOf("key" to WebPush(androidContext).publicKey()))}
                             post("push/subscribe"){
                                 if(!requireScope(call,"calls.read"))return@post
@@ -163,6 +171,14 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
             status="电话服务启动失败，请检查端口与证书"
         }
     }
+    private fun visibleDevices(call: ApplicationCall) =
+        hub.devices().filter { deviceAllowed(call,it["deviceId"].toString()) }.map {
+            it+("contactsWrite" to directory.deviceAccess(it["deviceId"].toString()).optBoolean("contactsWrite"))
+        }
+
+    private fun visibleLines(call: ApplicationCall) =
+        hub.allLines().filter { deviceAllowed(call,it["deviceId"].toString()) }.map { it-"subscriptionId" }
+
     private suspend fun asset(call:ApplicationCall,path:String) {
         if(!path.matches(Regex("(?:phone|assets)/[A-Za-z0-9_-]+[.][A-Za-z0-9]+"))) {
             call.respond(HttpStatusCode.NotFound);return

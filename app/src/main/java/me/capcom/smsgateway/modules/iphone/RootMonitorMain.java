@@ -36,10 +36,17 @@ public final class RootMonitorMain {
     }
     private static boolean command(String... args) throws Exception {
         java.lang.Process p=new ProcessBuilder(args).redirectErrorStream(true).start();
-        Thread drain=new Thread(() -> { try { byte[] b=new byte[1024]; while(p.getInputStream().read(b)!=-1) {} } catch(Exception ignored) {} });
+        ByteArrayOutputStream output=new ByteArrayOutputStream();
+        Thread drain=new Thread(() -> {
+            try (InputStream in=p.getInputStream()) {
+                byte[] bytes=new byte[1024]; int count;
+                while((count=in.read(bytes))!=-1) if(output.size()<8192) output.write(bytes,0,count);
+            } catch(IOException ignored) {}
+        });
         drain.setDaemon(true); drain.start();
         if(!p.waitFor(12,TimeUnit.SECONDS)) { p.destroyForcibly(); return false; }
-        return p.exitValue()==0;
+        drain.join(1000);
+        return !drain.isAlive() && p.exitValue()==0 && !output.toString("UTF-8").contains("Error:");
     }
     private static ProcessIdentity discoverProcess() throws Exception {
         java.lang.Process p=new ProcessBuilder("/system/bin/pidof",PACKAGE).redirectErrorStream(true).start();
@@ -147,6 +154,10 @@ public final class RootMonitorMain {
                                         out.write(saved.toString().getBytes("UTF-8"));
                                     }
                                     boolean requested=command("/system/bin/am","start-foreground-service","--user","0","-n",COMPONENT,"-a",PACKAGE+".RECOVER");
+                                    if(!requested && !running) {
+                                        requested=command("/system/bin/am","broadcast","--user","0","--include-stopped-packages",
+                                                "-n",PACKAGE+"/me.capcom.smsgateway.modules.iphone.RootRecoveryReceiver","-a",PACKAGE+".RECOVER");
+                                    }
                                     recovering=requested; last=android.os.SystemClock.elapsedRealtime(); lastDiscovery=0;
                                     status(requested?"已请求恢复服务，等待下次检查确认":"系统拒绝恢复，请打开应用检查");
                                 }

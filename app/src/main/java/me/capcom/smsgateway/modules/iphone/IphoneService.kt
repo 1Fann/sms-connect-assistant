@@ -12,6 +12,7 @@ import io.ktor.serialization.gson.gson
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.Netty
+import io.ktor.server.plugins.compression.*
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.*
@@ -230,12 +231,13 @@ class IphoneService : Service() {
                     exception<IllegalArgumentException> { call, _ -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to "请求格式有误或请求标识冲突")) }
                     exception<Throwable> { call, _ -> call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "网关操作失败，请检查安卓状态；不要重复新建发送请求")) }
                 }
+                compressWebAssets()
                 intercept(ApplicationCallPipeline.Plugins) {
                     call.response.header("Cache-Control", "no-store")
                     call.response.header("X-Content-Type-Options", "nosniff")
                     call.response.header("Referrer-Policy", "no-referrer")
                     call.response.header("Strict-Transport-Security", "max-age=31536000")
-                    call.response.header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+                    call.response.header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'sha256-$WEB_STARTUP_SCRIPT_HASH'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
                     // HTTP/2 carries the destination in :authority, which Ktor
                     // exposes through local.serverHost/serverPort, not Host.
                     val hostHeader = call.request.header("Host")
@@ -326,18 +328,26 @@ class IphoneService : Service() {
                     }
                     get("/api/history") {
                         val cursors=call.request.queryParameters["before"]?.split("_").orEmpty()
-                        val local=if(!allows(call,"server"))emptyList() else hub.localHistory(history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200))
+                        val startup=call.request.queryParameters["startup"]=="1"
+                        // The PWA formats addresses itself and fills in names after the first render.
+                        val quick=startup && call.request.queryParameters["quick"]=="1"
+                        val contactsAllowed=call.attributes[smsGrant].allows("contacts.read")
+                        val local=if(!allows(call,"server"))emptyList() else hub.localHistory(
+                            history.page(cursors.getOrNull(0)?.toLong()?:Long.MAX_VALUE,200,includePresentation=!quick)
+                        )
                         val seen=mutableMapOf<String,Long>()
                         val remote=hub.page(cursors.getOrNull(1)?.toLong()?:Long.MAX_VALUE,nodes(call)).map { it.copy(read=it.read || it.date<=seen.getOrPut(it.address){store.seen(it.address)}) }
                         fun next(rows:List<SmsRow>, peer:Boolean=false)=if(rows.size!=200)"0" else if(peer)hub.pageCursor(rows.last().id).toString() else rows.last().id.substringAfter(':')
                         val cursor=if(local.size<200 && remote.size<200)null else next(local)+"_"+next(remote,true)
                         val result=mutableMapOf<String,Any?>("items" to (local+remote).let { rows ->
                             val marks=store.scopedReadTimes(smsScope(call))
-                            val names=if(!call.attributes[smsGrant].allows("contacts.read"))emptyMap() else runCatching { directory.resolveNames(rows.map { it.address }){ d->allows(call,d) } }.getOrDefault(emptyMap())
-                            rows.map { r->r.copy(name=if(call.attributes[smsGrant].allows("contacts.read"))names[r.address]?:r.name else null, read=r.read || r.date<=(marks[r.address]?:0L)) }
+                            val names=if(quick || !contactsAllowed)emptyMap() else runCatching { directory.resolveNames(rows.map { it.address }){ d->allows(call,d) } }.getOrDefault(emptyMap())
+                            rows.map { r->r.copy(name=if(contactsAllowed && !quick)names[r.address]?:r.name else null, read=r.read || r.date<=(marks[r.address]?:0L)) }
                         }, "next" to cursor)
-                        if(call.request.queryParameters["startup"]=="1")
+                        if(startup)
                             result["conversations"]=visibleStates(call,store.scopedStates(smsScope(call)))
+                        if(quick && contactsAllowed && (local.isNotEmpty() || remote.isNotEmpty()))
+                            result["namesPending"]=true
                         call.respond(result)
                     }
                     get("/api/outgoing") {
@@ -500,3 +510,17 @@ internal suspend fun ApplicationCall.limitedBody(limit:Int):String {
     withTimeout(10_000) { while(true) { val n=channel.readAvailable(chunk); if(n<0) break; require(out.size()+n<=limit); out.write(chunk,0,n) } }
     return out.toString("UTF-8")
 }
+
+/** Compress versioned public assets only. Authenticated responses stay uncompressed. */
+internal fun Application.compressWebAssets() {
+    install(Compression) {
+        gzip {
+            minimumSize(1024)
+            condition { request.path().startsWith("/assets/") }
+            matchContentType(ContentType.Application.JavaScript, ContentType.Text.CSS)
+        }
+    }
+}
+
+// SHA-256 of the fixed early fetch in both PWA HTML entry pages.
+internal const val WEB_STARTUP_SCRIPT_HASH = "gT7o6XfR9LoFWrWbQKLuJ89KpI+BGak/L7lkV3HsV9I="

@@ -4,7 +4,7 @@ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const root=path.join(__dirname,'../public');
 async function check(kind){
  const phone=kind==='phone';
- const current=phone?'commlink-phone-shell-v2':'sms-shell-v10';
+ const current=phone?'commlink-phone-shell-v3':'sms-shell-v10';
  const stale=phone?'commlink-phone-shell-old':'sms-shell-old';
  const foreign=phone?'sms-shell-v10':'commlink-phone-shell-v2';
  const manifest=JSON.parse(fs.readFileSync(path.join(root,phone?'phone/manifest.webmanifest':'manifest.webmanifest')));

@@ -18,7 +18,7 @@ class SmsHistory(private val context: Context, private val store: PrivateStore) 
             while(result.size<50 && c.moveToNext())result.add(mapOf("name" to (c.getString(0) ?: ""),"number" to (c.getString(1) ?: "")))
         };result
     } catch(_: SecurityException) { emptyList() }
-    fun page(before: Long, limit: Int, ascending: Boolean=false): List<SmsRow> {
+    fun page(before: Long, limit: Int, ascending: Boolean=false, includePresentation: Boolean=true): List<SmsRow> {
         val result = mutableListOf<SmsRow>()
         val names = mutableMapOf<String, String?>()
         val displays = mutableMapOf<String, String>()
@@ -33,12 +33,12 @@ class SmsHistory(private val context: Context, private val store: PrivateStore) 
                 val date = c.getLong(3)
                 val type = c.getInt(4)
                 // Null is a cached "no matching contact", too.
-                if(!names.containsKey(address))names[address]=contact(raw)
+                if(includePresentation && !names.containsKey(address))names[address]=contact(raw)
                 val name=names[address]
                 val subscription=if(c.isNull(6))null else c.getInt(6)
                 if(subscription!=null && !slots.containsKey(subscription))
                     slots[subscription]=SubscriptionsHelper.getSimSlotIndex(context,subscription)?.plus(1)
-                result.add(SmsRow("sms:${c.getLong(0)}", address, displays.getOrPut(raw){format(raw)}, name, c.getString(2) ?: "", date,
+                result.add(SmsRow("sms:${c.getLong(0)}", address, if(includePresentation)displays.getOrPut(raw){format(raw)} else raw, name, c.getString(2) ?: "", date,
                     type == 1, c.getInt(5) == 1 || date <= seen.getOrPut(address){store.seen(address)},
                     subscription?.let { slots[it] },
                     when { type == 1 -> "received"; type == 5 || (type == 2 && c.getInt(7) >= 64) -> "failed"; type == 2 && c.getInt(7) == 0 -> "delivered"; type == 2 -> "sent"; type == 4 || type == 6 -> "accepted"; else -> "unknown" },c.getString(8),sourceSubscription=if(c.isNull(6)) null else c.getInt(6)))

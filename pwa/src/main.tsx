@@ -25,7 +25,7 @@ import {useViewport} from './viewport';
 import {composeRecipient} from './composeLink';
 
 const EMPTY:Sms[]=[];
-type HistoryPage={items:Sms[],next:string|null,conversations?:ConversationState[]};
+type HistoryPage={items:Sms[],next:string|null,conversations?:ConversationState[],namesPending?:boolean};
 
 function App(){
  useViewport();
@@ -99,7 +99,9 @@ function App(){
   const phonesTask=api<Phone[]>('phones').then(setPhones);
   const metadataTask=(initial?.metadata??api<ConversationState[]>('conversations')).then(result=>{if(epoch===generation.current&&!mutation.current&&!metadataWrites.current){if(!Array.isArray(result))throw Error('会话状态暂不可用，请更新安卓应用后重试');setConversationStates(prev=>reuseRecords(prev,result));setMetadataReady(true)}});
   const historyTask=(async()=>{
-   const data=await (initial?.history??api<HistoryPage>('history'+(older&&cursorRef.current?'?before='+cursorRef.current:'')));
+   const firstPage=initial?await initial.history:null;
+   const data=firstPage&&!firstPage.namesPending?firstPage:
+    await api<HistoryPage>('history'+(older&&cursorRef.current?'?before='+cursorRef.current:''));
    if(older){const el=screen==='chat'?chatView.current:listView.current;if(el)pendingAnchor.current={el,top:el.scrollTop,height:el.scrollHeight}}
    setRows(prev=>{
     if(older)return reuseRecords(prev,[...new Map([...prev,...data.items].map(m=>[m.id,m])).values()]);
@@ -130,7 +132,7 @@ function App(){
   setPaired(null);setSessionFailed(false);setError('');
   // This authenticated response supplies both rows and removal/pin/read state.
   // Old hosts omit conversations; retain their separate metadata endpoint.
-  const history=api<HistoryPage>('history?startup=1');
+  const history=api<HistoryPage>('history?startup=1&quick=1');
   const metadata=history.then(data=>data.conversations??api<ConversationState[]>('conversations'));
   const initial={history,metadata};
   firstLoad.current=initial;

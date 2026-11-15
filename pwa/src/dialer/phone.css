@@ -20,6 +20,15 @@
 
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 
+.phone-startup {
+  height: 100%;
+  overflow: auto;
+  padding: calc(env(safe-area-inset-top) + 24px) 20px calc(env(safe-area-inset-bottom) + 24px);
+  text-align: center;
+}
+.phone-startup h1 {font-size: 17px; font-weight: 650; margin: 0;}
+.phone-startup-retry {margin: 64px auto 0; color: var(--muted);}
+
 .contact-sheet{touch-action:pan-y}.poster-actions a[aria-disabled=true]{opacity:.38}.dock-icon{position:relative;display:inline-flex;align-items:center;justify-content:center}.missed-badge{position:absolute;top:-7px;right:-13px;min-width:17px;height:17px;padding:0 4px;border-radius:10px;background:#ff3b30;color:#fff;font-size:10px;font-style:normal;font-weight:650;line-height:17px;text-align:center;border:1px solid var(--bg)}
 
 

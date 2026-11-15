@@ -26,6 +26,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(root,'.'+(new
    return route.fulfill({contentType:'application/json',body:JSON.stringify({count:0})});
   }
   if(req.method()!=='GET'){writes.push(key);return route.abort()}
+  if(key==='startup')return route.fulfill({status:404,json:{}});
   const records=Array.from({length:15},(_,i)=>({id:'call-'+i,name:i%3===0?'演示联系人 '+(i+1):'',number:'55501'+String(i).padStart(2,'0'),deviceId:'server',slot:i%3===0?2:i%3===1?1:null,type:i%4===1?'missed':i%2?'incoming':'outgoing',date:Date.now()-i*4000000,duration:i%4?45:0}));
   const data={
    session:{installationId:installation,permissions:['calls.read','calls.dial','contacts.read']},

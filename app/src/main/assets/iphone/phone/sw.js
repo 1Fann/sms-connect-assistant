@@ -1,5 +1,5 @@
 // App-shell only. Never cache authenticated requests, SMS bodies or credentials.
-const CACHE = 'commlink-phone-shell-v3';
+const CACHE = 'commlink-phone-shell-v5';
 const app='/phone/';
 // Publish an updated shell only after its versioned entry chunks are available.
 async function refreshShell(request, cache) {

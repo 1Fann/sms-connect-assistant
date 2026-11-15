@@ -3,10 +3,93 @@ const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const root=path.resolve(__dirname,'../../app/src/main/assets/iphone');
 const server=http.createServer((req,res)=>{
- const file=path.resolve(root,'.'+(req.url==='/'?'/index.html':req.url.split('?')[0]));
+ const pathname=new URL(req.url,'http://localhost').pathname;
+ const file=path.resolve(root,'.'+(pathname.endsWith('/')?pathname+'index.html':pathname));
  if(!file.startsWith(root+path.sep))return res.writeHead(403).end();
  try{res.setHeader('Content-Type',file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(fs.readFileSync(file))}catch{res.writeHead(404).end()}
 });
+
+async function testPhoneStartup(browser){
+ const url='http://127.0.0.1:'+server.address().port+'/phone/';
+ for(const scenario of ['ready','offline','expired','missed']){
+  const page=await browser.newPage({serviceWorkers:'block',viewport:{width:390,height:844}});
+  try{
+   await page.addInitScript(()=>{
+    window.phonePairAppeared=false;window.phoneKeypadAppeared=false;
+    new MutationObserver(()=>{
+     window.phonePairAppeared ||= !!document.querySelector('.pair');
+     window.phoneKeypadAppeared ||= !!document.querySelector('.dialer-screen:not([hidden] *)');
+    }).observe(document,{subtree:true,childList:true,attributes:true});
+   });
+   let release;
+   const gate=new Promise(resolve=>{release=resolve});
+   let reads=0;
+   await page.route('**/api/**',async route=>{
+    const pathname=new URL(route.request().url()).pathname;
+    const reply=(data,status=200)=>route.fulfill({status,json:data});
+    if(pathname==='/api/v2/startup'){
+     if(++reads===1){
+      await gate;
+      if(scenario==='offline')return reply({},503);
+      if(scenario==='expired')return reply({},401);
+     }
+     return reply({
+      session:{installationId:'test-phone',permissions:['calls.dial','calls.read']},
+      devices:[],
+      lines:[{lineId:'fixture-line',deviceId:'server',name:'测试线路',slot:1,online:true,confirmed:true}],
+      routes:[{lineId:'fixture-line',prefix:'*81*'}],
+     });
+    }
+    if(pathname==='/api/refresh')return reply({},401);
+    if(pathname==='/api/v2/call-history/missed')return reply({count:0});
+    if(pathname==='/api/v2/call-history')return reply({items:[],next:null});
+    if(pathname==='/api/v2/voice/history')return reply([]);
+    throw Error('Unexpected fixture request '+pathname);
+   });
+   await page.goto(url+(scenario==='missed'?'#missed':''),{waitUntil:'domcontentloaded'});
+   const loading=page.locator('main[aria-busy="true"]');
+   await loading.waitFor();
+   assert.equal(await page.locator('.pair').count(),0);
+   const keypad=page.locator('.keypad'),dock=page.locator('.phone-dock');
+   let keypadBefore,dockBefore;
+   if(scenario==='missed'){
+    assert.equal(await page.locator('.dialer-screen, .phone-dock').count(),0);
+   }else{
+    keypadBefore=await keypad.boundingBox();dockBefore=await dock.boundingBox();
+    assert.ok(keypadBefore&&dockBefore,'The final layout renders during the live startup request');
+    assert.ok(await loading.evaluate(el=>el.inert));
+    assert.ok(await dock.evaluate(el=>el.inert));
+    assert.equal(await page.locator('.dial').getAttribute('href'),null);
+    assert.equal(await page.getByText('原选线路不可用').count(),0);
+    await keypad.evaluate(el=>{window.initialKeypad=el});
+   }
+   release();
+   if(scenario==='expired'){
+    await page.getByLabel('配对码').waitFor();
+    assert.equal(await page.locator('.dialer-screen').count(),0);
+   }else{
+    if(scenario==='offline'){
+     await page.getByRole('button',{name:'重新连接'}).click();
+    }
+    await page.getByRole('navigation',{name:'电话导航'}).waitFor();
+    assert.equal(await loading.count(),0);
+    assert.equal(await page.evaluate(()=>window.phonePairAppeared),false);
+    if(scenario==='missed'){
+     assert.equal(await page.getByRole('button',{name:'通话',exact:true}).getAttribute('aria-current'),'page');
+     assert.equal(await page.evaluate(()=>window.phoneKeypadAppeared),false);
+    }else{
+     if(scenario==='ready'){
+      assert.ok(await keypad.evaluate(el=>el===window.initialKeypad),'The same keypad stays mounted after startup');
+      assert.deepEqual(await keypad.boundingBox(),keypadBefore);
+      assert.deepEqual(await dock.boundingBox(),dockBefore);
+     }
+     await page.getByLabel('拨出线路').selectOption('fixture-line');
+     assert.equal(await page.getByLabel('拨出线路').inputValue(),'fixture-line');
+    }
+   }
+  }finally{await page.close()}
+ }
+}
 (async()=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL||'msedge'});
@@ -74,6 +157,7 @@ const server=http.createServer((req,res)=>{
    }
    assert.equal(sends,0);assert.deepEqual(errors,[]);await context.close();
   }
-  console.log('PASS pending session has no pairing flash or message exposure, valid login, expiry, network retry and revocation; zero sends');
+  await testPhoneStartup(browser);
+  console.log('PASS Messages and Phone startup: no pairing flash, live data, expiry, network retry and direct missed-call entry');
  }finally{await browser.close();server.close()}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});

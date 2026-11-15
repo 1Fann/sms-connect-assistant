@@ -67,12 +67,14 @@ async function updateMissedBadge(){
     const {count}=await response.json();
     if(!Number.isInteger(count)||count<0)throw Error('Invalid badge count');
     if(count)await self.navigator.setAppBadge?.(count);else await self.navigator.clearAppBadge?.();
-  }catch{/* The push's initial dot remains when the network is unavailable. */}
+  }catch{/* Keep the numeric unread indicator when the count is unavailable. */}
 }
 self.addEventListener('push',event=>event.waitUntil((async()=>{
   await Promise.allSettled([
     self.registration.showNotification('互联电话',{body:'有新的未接来电',tag:'phone-missed',icon:app+'icon-192.png'}),
-    self.navigator.setAppBadge?.()
+    // An unnumbered flag is not visible on iOS and may clear a previous count.
+    // Show at least one unread alert while fetching the exact missed-call count.
+    self.navigator.setAppBadge?.(1)
   ]);
   await updateMissedBadge();
   for(const client of await clients.matchAll({type:'window'}))client.postMessage({type:'phone-missed-updated'});

@@ -61,10 +61,12 @@ self.addEventListener('push', event => {
     body: preview ? payload.body : '收到一条新短信',
     icon: '/icon-192.png', tag: address ? 'sms-' + address : 'sms', data: {address}
   });
-  // Push can arrive while the app is closed. Opening the app reconciles the count.
+  // iOS does not display an unnumbered flag; setAppBadge() can remove an
+  // existing numeric badge. Use 1 as an unread indicator until the app opens
+  // and reconciles the full conversation count. Preview tests leave it alone.
   const badge = payload?.badge === false || !self.navigator?.setAppBadge
     ? Promise.resolve()
-    : self.navigator.setAppBadge().catch(() => {});
+    : self.navigator.setAppBadge(1).catch(() => {});
   event.waitUntil(Promise.allSettled([notification, badge]));
 });
 self.addEventListener('notificationclick', event => {

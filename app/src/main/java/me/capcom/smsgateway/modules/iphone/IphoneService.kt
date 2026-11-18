@@ -58,6 +58,7 @@ class IphoneService : Service() {
     private fun smsScope(c:ApplicationCall)=PrivateStore.smsScope(c.attributes[smsGrant].grants)
     private fun nodes(c:ApplicationCall)=c.attributes[smsGrant].nodes()
     private fun allows(c:ApplicationCall,id:String)=id in nodes(c)
+    private fun smsBadge(c:ApplicationCall)=SmsBadges.count(this,store,c.attributes[smsGrant].grants,c.attributes[smsGrant].installation)
     private fun visibleAddresses(c:ApplicationCall):Set<String> {
         val set=nodes(c)
         return hub.visibleAddresses(set) + (if("server" in set)history.addresses() else emptySet())
@@ -318,6 +319,16 @@ class IphoneService : Service() {
                         val local=if(allows(call,"server"))history.contacts(q) else emptyList()
                         call.respond((merged+local).distinctBy { PhoneIdentity.normalize(it["number"].orEmpty()) }.take(50)) }
                     get("/api/conversations") { call.respond(visibleStates(call,store.scopedStates(smsScope(call)))) }
+                    get("/api/badge") {
+                        call.respond(mapOf("count" to smsBadge(call)))
+                    }
+                    post("/api/badge") {
+                        val region=call.json()["region"]?:"CN"
+                        require(region in com.google.i18n.phonenumbers.PhoneNumberUtil.getInstance().supportedRegions)
+                        // Persist only this installation's number-format region, never inbox data.
+                        prefs.edit().putString("badge-region-"+call.attributes[smsGrant].installation,region).apply()
+                        call.respond(mapOf("count" to smsBadge(call)))
+                    }
                     post("/api/conversations") { val b=call.json(); val address=b["address"]!!; val region=b["region"]?:"CN"
                         if(visibleAddresses(call).none { ConversationIdentity.key(it,region)==ConversationIdentity.key(address,region) })return@post call.respond(HttpStatusCode.Forbidden)
                         call.respond(visibleStates(call,store.updateConversation(address,b["action"]!!,region,smsScope(call)))) }
@@ -368,11 +379,13 @@ class IphoneService : Service() {
                     get("/api/push/preview") { call.respond(mapOf("enabled" to store.previewEnabled(call.request.cookies["__Host-iphone"]!!))) }
                     post("/api/push/subscribe") {
                         val b = call.json()
-                        fun key(field: String) = if(b["preview"] == "true") android.util.Base64.decode(
-                            requireNotNull(b[field]), android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
-                        ) else null
-                        store.subscribe(requireNotNull(b["endpoint"]), call.request.cookies["__Host-iphone"]!!, key("p256dh"), key("auth"))
+                        val (key,auth)=PushSubscriptionKeys.decode(b)
+                        store.subscribe(requireNotNull(b["endpoint"]), call.request.cookies["__Host-iphone"]!!,key,auth,b["preview"]=="true")
                         call.respond(mapOf("ok" to true))
+                    }
+                    post("/api/push/keys") {
+                        val b=call.json();val (key,auth)=PushSubscriptionKeys.decode(b)
+                        call.respond(mapOf("ok" to store.refreshPushKeys(b["endpoint"].orEmpty(),call.request.cookies["__Host-iphone"]!!,requireNotNull(key),requireNotNull(auth))))
                     }
                     post("/api/push/unsubscribe") { store.unsubscribe(call.request.cookies["__Host-iphone"]!!);call.respond(mapOf("ok" to true)) }
                     post("/api/push/test") { if(!pairingLimit.allow())return@post call.respond(HttpStatusCode.TooManyRequests);WebPushWorker.enqueueTest(this@IphoneService,call.attributes[smsGrant].installation);call.respond(mapOf("status" to "已排队；不代表已提交或设备已收到")) }

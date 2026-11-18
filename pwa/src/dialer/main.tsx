@@ -9,6 +9,7 @@ import './phone.css';
 import {useViewport} from '../viewport';
 import {useContactEditorDock} from './contactEditorViewport';
 import {useMissedBadge} from './missedBadge';
+import {refreshPushKeys} from '../pushKeys';
 import {isPresentSim,lineStatus} from '../lines';
 import type {NativeRoute} from './groundwire';
 
@@ -29,7 +30,9 @@ async function enablePush(){
  const reg=await navigator.serviceWorker.ready;
  const {key}=await api<{key:string}>('push/key');
  const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(atob(key.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0))});
- await api('push/subscribe',{endpoint:sub.endpoint});
+ const keys=sub.toJSON().keys;
+ if(!keys?.p256dh||!keys.auth)throw Error('设备未提供通知加密密钥，请重新订阅');
+ await api('push/subscribe',{endpoint:sub.endpoint,...keys});
 }
 function App(){
  useViewport();
@@ -38,6 +41,7 @@ function App(){
  const [startup,setStartup]=useState<StartupState>({stage:'loading'});
  const data=startup.stage==='ready'?startup.data:null;
  const session=data?.session;
+ useEffect(()=>{if(session?.permissions.includes('calls.read'))void refreshPushKeys(body=>api('push/keys',body))},[session?.installationId]);
  const [code,setCode]=useState(''),[waiting,wait]=useState(false),[message,setMessage]=useState('');
  const [tab,setTab]=useState(()=>location.hash==='#missed'?'最近通话':keypadTab),[number,setNumber]=useState('');
  const [lineHint,hint]=useState({id:'',seq:0}),[order,setOrder]=useState<string[]>(()=>{try{const v=JSON.parse(localStorage.getItem('phone.order')||'[]');return Array.isArray(v)?v:[]}catch{return []}});

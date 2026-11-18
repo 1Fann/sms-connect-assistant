@@ -53,8 +53,14 @@ self.addEventListener('fetch', event => {
     return response;
   }).catch(()=>caches.open(CACHE).then(c=>c.match(event.request)).then(r=>r || Response.error())));
 });
-async function updateMissedBadge(){
+async function updateMissedBadge(payload){
   try {
+    const raw=payload?.app_badge ?? payload?.notification?.app_badge;
+    const included=typeof raw==='string'&&/^\d+$/.test(raw)?Number(raw):raw;
+    if(Number.isSafeInteger(included)&&included>=0){
+      if(included)await self.navigator.setAppBadge?.(included);else await self.navigator.clearAppBadge?.();
+      return;
+    }
     const request=()=>fetch('/api/v2/call-history/missed',{credentials:'include',cache:'no-store',signal:AbortSignal.timeout(6000)});
     let response=await request();
     if(response.status===401){
@@ -65,18 +71,19 @@ async function updateMissedBadge(){
     if(response.status===401||response.status===403)return;
     if(!response.ok)throw Error('Badge count unavailable');
     const {count}=await response.json();
-    if(!Number.isInteger(count)||count<0)throw Error('Invalid badge count');
+    if(!Number.isSafeInteger(count)||count<0)throw Error('Invalid badge count');
     if(count)await self.navigator.setAppBadge?.(count);else await self.navigator.clearAppBadge?.();
-  }catch{/* Keep the numeric unread indicator when the count is unavailable. */}
+  }catch{/* Keep the existing count when the server cannot confirm a new one. */}
 }
+let missedBadgeUpdate=Promise.resolve();
 self.addEventListener('push',event=>event.waitUntil((async()=>{
+  if(event.notification)return; // Let iOS display the complete declarative notification.
+  let payload;try{payload=event.data?.json()}catch{/* Legacy push. */}
+  missedBadgeUpdate=missedBadgeUpdate.then(()=>updateMissedBadge(payload));
   await Promise.allSettled([
     self.registration.showNotification('互联电话',{body:'有新的未接来电',tag:'phone-missed',icon:app+'icon-192.png'}),
-    // An unnumbered flag is not visible on iOS and may clear a previous count.
-    // Show at least one unread alert while fetching the exact missed-call count.
-    self.navigator.setAppBadge?.(1)
+    missedBadgeUpdate
   ]);
-  await updateMissedBadge();
   for(const client of await clients.matchAll({type:'window'}))client.postMessage({type:'phone-missed-updated'});
 })()));
 self.addEventListener('notificationclick',event=>{

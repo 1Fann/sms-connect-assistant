@@ -52,21 +52,49 @@ self.addEventListener('fetch', event => {
     return response;
   }).catch(()=>caches.open(CACHE).then(c=>c.match(event.request)).then(r=>r || Response.error())));
 });
+// Serialise pushes so an older, slower response cannot replace a newer count.
+let badgeUpdate = Promise.resolve();
+function updateSmsBadge(payload) {
+  badgeUpdate=badgeUpdate.then(async()=>{
+    if(!self.navigator?.setAppBadge)return;
+    try {
+      const raw=payload?.app_badge ?? payload?.notification?.app_badge;
+      const included=typeof raw==='string'&&/^\d+$/.test(raw)?Number(raw):raw;
+      if(Number.isSafeInteger(included)&&included>=0){
+        if(included)await self.navigator.setAppBadge(included);else await self.navigator.clearAppBadge?.();
+        return;
+      }
+      const request=()=>fetch('/api/badge',{credentials:'include',cache:'no-store',signal:AbortSignal.timeout(6000)});
+      let response=await request();
+      if(response.status===401){
+        const renewed=await fetch('/api/refresh',{method:'POST',credentials:'include',signal:AbortSignal.timeout(6000)});
+        if(!renewed.ok)return;
+        response=await request();
+      }
+      if(!response.ok)return;
+      const {count}=await response.json();
+      if(!Number.isSafeInteger(count)||count<0)return;
+      if(count)await self.navigator.setAppBadge(count);else await self.navigator.clearAppBadge?.();
+    }catch{/* Offline or expired access is not an unread count. Leave the badge alone. */}
+  });
+  return badgeUpdate;
+}
 self.addEventListener('push', event => {
+  // Declarative pushes are displayed by iOS itself. Do not replace its proposal
+  // with a generic notification or perform a background network request.
+  if(event.notification){event.waitUntil(Promise.resolve());return;}
   let payload;
   try { payload = event.data?.json(); } catch { /* Older or invalid payload. */ }
-  const preview = typeof payload?.title === 'string' && typeof payload?.body === 'string';
-  const address = preview && typeof payload.address === 'string' ? payload.address.slice(0,100) : '';
-  const notification = self.registration.showNotification(preview ? payload.title : '互联信息', {
-    body: preview ? payload.body : '收到一条新短信',
+  const content=payload?.web_push===8030 ? payload.notification : payload;
+  const preview = typeof content?.title === 'string' && typeof content?.body === 'string';
+  const sender=content?.data?.address ?? payload?.address;
+  const address = preview && typeof sender === 'string' ? sender.slice(0,100) : '';
+  const notification = self.registration.showNotification(preview ? content.title : '互联信息', {
+    body: preview ? content.body : '收到一条新短信',
     icon: '/icon-192.png', tag: address ? 'sms-' + address : 'sms', data: {address}
   });
-  // iOS does not display an unnumbered flag; setAppBadge() can remove an
-  // existing numeric badge. Use 1 as an unread indicator until the app opens
-  // and reconciles the full conversation count. Preview tests leave it alone.
-  const badge = payload?.badge === false || !self.navigator?.setAppBadge
-    ? Promise.resolve()
-    : self.navigator.setAppBadge(1).catch(() => {});
+  // Never replace the unread total with a synthetic 1 on each notification.
+  const badge = payload?.badge === false ? Promise.resolve() : updateSmsBadge(payload);
   event.waitUntil(Promise.allSettled([notification, badge]));
 });
 self.addEventListener('notificationclick', event => {

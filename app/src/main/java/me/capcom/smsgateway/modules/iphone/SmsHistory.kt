@@ -11,6 +11,13 @@ data class SmsRow(val id: String, val address: String, val display: String, val 
     val date: Long, val incoming: Boolean, val read: Boolean, val sim: Int?, val state: String, val creator: String? = null, val error: String? = null, val sourceSubscription: Int? = null)
 
 class SmsHistory(private val context: Context, private val store: PrivateStore) {
+    fun forEachBadgeRow(consume:(SmsBadgeRow)->Unit) {
+        val cursor=context.contentResolver.query(Telephony.Sms.CONTENT_URI,
+            arrayOf("address","date","type","read"),null,null,null)
+            ?: throw IllegalStateException("SMS metadata unavailable")
+        cursor.use { c -> while(c.moveToNext())consume(SmsBadgeRow(
+            PhoneIdentity.normalize(c.getString(0)?:"未知号码"),c.getLong(1),c.getInt(2)==1,c.getInt(3)==1)) }
+    }
     fun contacts(query: String): List<Map<String,String>> = try {
         val result=mutableListOf<Map<String,String>>()
         context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,

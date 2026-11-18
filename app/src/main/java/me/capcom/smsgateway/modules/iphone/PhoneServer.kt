@@ -136,8 +136,14 @@ class PhoneServer(private val androidContext:Context, private val store:PrivateS
                             get("push/key"){call.respond(mapOf("key" to WebPush(androidContext).publicKey()))}
                             post("push/subscribe"){
                                 if(!requireScope(call,"calls.read"))return@post
-                                store.subscribe(call.json()["endpoint"].orEmpty(),call.request.cookies["__Host-phone"]!!,null,null)
+                                val b=call.json();val (key,auth)=PushSubscriptionKeys.decode(b)
+                                store.subscribe(b["endpoint"].orEmpty(),call.request.cookies["__Host-phone"]!!,key,auth,false)
                                 call.respond(mapOf("ok" to true))
+                            }
+                            post("push/keys"){
+                                if(!requireScope(call,"calls.read"))return@post
+                                val b=call.json();val (key,auth)=PushSubscriptionKeys.decode(b)
+                                call.respond(mapOf("ok" to store.refreshPushKeys(b["endpoint"].orEmpty(),call.request.cookies["__Host-phone"]!!,requireNotNull(key),requireNotNull(auth))))
                             }
                             post("push/unsubscribe"){store.unsubscribe(call.request.cookies["__Host-phone"]!!);call.respond(mapOf("ok" to true))}
                             directoryRoutes(directory,::requireScope,::deviceAllowed,{ owner(it).installation },{ owner(it).allows("contacts.read") })

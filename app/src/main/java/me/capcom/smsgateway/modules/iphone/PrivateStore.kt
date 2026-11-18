@@ -7,7 +7,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Only hashes and metadata are stored here, never SMS bodies or raw session keys. */
-class PrivateStore(context: Context, databaseName:String="iphone.db") : SQLiteOpenHelper(context, databaseName, null, 8) {
+class PrivateStore(context: Context, databaseName:String="iphone.db") : SQLiteOpenHelper(context, databaseName, null, 9) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE sessions (hash TEXT PRIMARY KEY, name TEXT NOT NULL, expires INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE requests (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, created INTEGER NOT NULL, generation INTEGER NOT NULL DEFAULT 1, rejected INTEGER NOT NULL DEFAULT 0)")
@@ -18,6 +18,7 @@ class PrivateStore(context: Context, databaseName:String="iphone.db") : SQLiteOp
         createConversations(db)
         addPreviewKeys(db)
         migrateInstallations(db)
+        separatePreviewConsent(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
         if(old<6) {
@@ -30,6 +31,7 @@ class PrivateStore(context: Context, databaseName:String="iphone.db") : SQLiteOp
         if(old<4) createConversations(db)
         if(old<7) addPreviewKeys(db)
         if(old<8) migrateInstallations(db)
+        if(old<9) separatePreviewConsent(db)
         if(old==4) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN muted INTEGER NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE conversations ADD COLUMN region TEXT NOT NULL DEFAULT 'CN'")
@@ -103,32 +105,43 @@ class PrivateStore(context: Context, databaseName:String="iphone.db") : SQLiteOp
         db.execSQL("ALTER TABLE subscriptions ADD COLUMN public_key BLOB")
         db.execSQL("ALTER TABLE subscriptions ADD COLUMN auth_key BLOB")
     }
-    data class Subscription(val endpoint: String, val publicKey: ByteArray?, val auth: ByteArray?, val grants:String="", val installation:String="")
-    fun subscribe(endpoint: String, token: String, publicKey: ByteArray?, auth: ByteArray?) {
+    private fun separatePreviewConsent(db:SQLiteDatabase) {
+        db.execSQL("ALTER TABLE subscriptions ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE subscriptions SET preview_enabled=1 WHERE public_key IS NOT NULL AND auth_key IS NOT NULL AND owner IN (SELECT hash FROM sessions WHERE app='sms')")
+    }
+    data class Subscription(val endpoint: String, val publicKey: ByteArray?, val auth: ByteArray?, val grants:String="", val installation:String="", val previewEnabled:Boolean=false)
+    fun subscribe(endpoint: String, token: String, publicKey: ByteArray?, auth: ByteArray?, preview:Boolean=publicKey!=null) {
         require(WebPush.validEndpoint(endpoint))
         if(publicKey != null) PushEncryption.publicKey(publicKey)
         require((publicKey == null && auth == null) || (publicKey != null && auth?.size == 16))
+        require(!preview || publicKey!=null)
         val db = writableDatabase
         db.beginTransaction()
         try {
             require(!db.rawQuery("SELECT 1 FROM subscriptions WHERE endpoint=? AND owner<>?",arrayOf(endpoint,hash(token))).use { it.moveToFirst() }) { "通知订阅已关联另一实例" }
             unsubscribe(token)
-            db.execSQL("INSERT OR REPLACE INTO subscriptions(endpoint,owner,public_key,auth_key) VALUES(?,?,?,?)",
-                arrayOf(endpoint,hash(token),publicKey,auth))
+            db.execSQL("INSERT OR REPLACE INTO subscriptions(endpoint,owner,public_key,auth_key,preview_enabled) VALUES(?,?,?,?,?)",
+                arrayOf(endpoint,hash(token),publicKey,auth,if(preview)1 else 0))
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
     fun disablePreview(token: String) = writableDatabase.execSQL(
-        "UPDATE subscriptions SET public_key=NULL, auth_key=NULL WHERE owner=?", arrayOf(hash(token))
+        "UPDATE subscriptions SET preview_enabled=0 WHERE owner=?", arrayOf(hash(token))
     )
     fun previewEnabled(token: String) = readableDatabase.rawQuery(
-        "SELECT 1 FROM subscriptions WHERE owner=? AND public_key IS NOT NULL", arrayOf(hash(token))
+        "SELECT 1 FROM subscriptions WHERE owner=? AND preview_enabled=1", arrayOf(hash(token))
     ).use { it.moveToFirst() }
+    /** Upgrade only an existing owned subscription; never re-enable notifications or preview. */
+    fun refreshPushKeys(endpoint:String,token:String,publicKey:ByteArray,auth:ByteArray):Boolean {
+        require(WebPush.validEndpoint(endpoint));PushEncryption.publicKey(publicKey);require(auth.size==16)
+        val values=android.content.ContentValues().apply {put("public_key",publicKey);put("auth_key",auth)}
+        return writableDatabase.update("subscriptions",values,"endpoint=? AND owner=?",arrayOf(endpoint,hash(token)))==1
+    }
     fun subscriptions(app: String = "sms", device: String = ""): List<Subscription> = readableDatabase.rawQuery(
-        "SELECT endpoint,public_key,auth_key,grants,installation FROM subscriptions JOIN sessions ON owner=hash WHERE app=? AND ((app='sms' OR instr(','||grants||',',',calls.read,')>0) AND (?='' OR instr(','||grants||',', ',device:' || ? || ',')>0)) AND (expires>? OR EXISTS(SELECT 1 FROM refresh WHERE refresh.owner=sessions.hash AND refresh.expires>?))",
+        "SELECT endpoint,public_key,auth_key,grants,installation,preview_enabled FROM subscriptions JOIN sessions ON owner=hash WHERE app=? AND ((app='sms' AND instr(','||grants||',',',sms.read,')>0 OR app='phone' AND instr(','||grants||',',',calls.read,')>0) AND (?='' OR instr(','||grants||',', ',device:' || ? || ',')>0)) AND (expires>? OR EXISTS(SELECT 1 FROM refresh WHERE refresh.owner=sessions.hash AND refresh.expires>?))",
         arrayOf(app,device,device,System.currentTimeMillis().toString(),System.currentTimeMillis().toString())
     ).use { c -> buildList {
-        while(c.moveToNext()) add(Subscription(c.getString(0), if(c.isNull(1)) null else c.getBlob(1), if(c.isNull(2)) null else c.getBlob(2),c.getString(3),c.getString(4)))
+        while(c.moveToNext()) add(Subscription(c.getString(0), if(c.isNull(1)) null else c.getBlob(1), if(c.isNull(2)) null else c.getBlob(2),c.getString(3),c.getString(4),c.getInt(5)!=0))
     } }
     fun removeSubscription(endpoint: String) = writableDatabase.execSQL("DELETE FROM subscriptions WHERE endpoint=?",arrayOf(endpoint))
     fun unsubscribe(token: String) = writableDatabase.execSQL("DELETE FROM subscriptions WHERE owner=?",arrayOf(hash(token)))
@@ -200,6 +213,9 @@ class PrivateStore(context: Context, databaseName:String="iphone.db") : SQLiteOp
         "INSERT OR REPLACE INTO scope_reads VALUES(?,?,max(?,coalesce((SELECT seen FROM scope_reads WHERE scope=? AND address=?),0)))",
         arrayOf(scope,address,time,scope,address))
     fun seen(address: String): Long = readableDatabase.rawQuery("SELECT seen FROM reads WHERE address=?", arrayOf(address)).use { if(it.moveToFirst()) it.getLong(0) else 0L }
+    fun legacyReadTimes():Map<String,Long> = readableDatabase.rawQuery("SELECT address,seen FROM reads",null).use { c ->
+        buildMap { while(c.moveToNext())put(c.getString(0),c.getLong(1)) }
+    }
     fun markRead(address: String, time: Long) = writableDatabase.execSQL("INSERT OR REPLACE INTO reads VALUES(?,max(?,coalesce((SELECT seen FROM reads WHERE address=?),0)))", arrayOf(address, time,address))
     companion object {
         fun smsScope(grants:String)=hash(grants.split(',').filter { it.startsWith("device:") }.sorted().joinToString(","))

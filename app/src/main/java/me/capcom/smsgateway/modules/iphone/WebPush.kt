@@ -16,7 +16,7 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.*
 import java.util.concurrent.TimeUnit
 
-/** Legacy subscriptions receive empty pushes; previews use RFC 8291 encryption. */
+/** Legacy subscriptions receive empty pushes; all keyed payloads use RFC 8291 encryption. */
 class WebPush(private val context: Context) {
     private val vault=SecretVault(context)
     private fun keys(): KeyPair = synchronized(KEY_LOCK) {
@@ -71,6 +71,7 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
             }
             val test=inputData.getBoolean("test",false)
             val device=inputData.getString("device")
+            val origin="https://"+applicationContext.getSharedPreferences("iphone",0).getString("host","sms.example.com")+":8443"
             for(subscription in store.subscriptions("sms",device.orEmpty())) {
                 val scopes=subscription.grants.split(',')
                 if(test && inputData.getString("installation")!=null && subscription.installation!=inputData.getString("installation"))continue
@@ -80,14 +81,22 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
                 // muted while offline.
                 if(!PushPolicy.allowed(inputData.getString("address"),store.scopedStates(PrivateStore.smsScope(subscription.grants)),inputData.getBoolean("test",false))) continue
                 try {
-                    val content=if(subscription.publicKey==null)null else preview?.let { raw ->
-                        if(test)raw else runCatching {
-                            val json=org.json.JSONObject(String(raw,Charsets.UTF_8))
-                            val name=if("contacts.read" !in scopes) SmsHistory(applicationContext,store).format(json.optString("address")) else me.capcom.smsgateway.modules.directory.DirectoryService.get(applicationContext)
-                                .resolveName(json.optString("address")) { "device:"+it in scopes }
-                            if(name!=null)json.put("title",name)
-                            json.toString().toByteArray()
-                        }.getOrDefault(raw)
+                    val content=if(subscription.publicKey==null)null else {
+                        val visiblePreview=if(!subscription.previewEnabled)null else preview?.let { raw -> runCatching {
+                            val json=com.google.gson.JsonParser.parseString(String(raw,Charsets.UTF_8)).asJsonObject
+                            if(!test) {
+                                val address=json.get("address")?.asString.orEmpty()
+                                val formatted=SmsHistory(applicationContext,store).format(address)
+                                val name=if("contacts.read" !in scopes)null else me.capcom.smsgateway.modules.directory.DirectoryService.get(applicationContext)
+                                    .resolveName(address) { "device:"+it in scopes }
+                                // Never expose a previously queued contact name after grants change.
+                                json.addProperty("title",name?:formatted)
+                            }
+                            json
+                        }.getOrNull() }
+                        // Query at send/retry time. A failed query must not invent zero or suppress the notification.
+                        val count=if(test)null else runCatching { SmsBadges.count(applicationContext,store,subscription.grants,subscription.installation) }.getOrNull()
+                        PushPayload.sms(origin,count,visiblePreview,subscription.previewEnabled,test)
                     }
                     when(val status=WebPush(applicationContext).send(subscription,content)) {
                     404,410 -> {
@@ -114,7 +123,7 @@ class WebPushWorker(context: Context,params: WorkerParameters): CoroutineWorker(
         private fun messageData(context: Context, address: String, body: String?, name: String?,device:String): Data {
             val data = Data.Builder().putString("device",device).putString("address",address.take(100))
             PrivateStore(context).use { store ->
-                if(body != null && store.subscriptions("sms",device).any { it.publicKey != null }) {
+                if(body != null && store.subscriptions("sms",device).any { it.previewEnabled && it.publicKey != null }) {
                     // Keep only an encrypted, bounded snapshot in WorkManager, tied to this receipt.
                     val sealed = runCatching {
                         val history = SmsHistory(context, store)

@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {getCountries} from 'libphonenumber-js/max';
 import {formatPhone,identity,type CountryCode} from './phone';
 import {api,ApiError,stateLabel,type Sms} from './api';
+import {refreshPushKeys} from './pushKeys';
 import './style.css';
 import {NameEditor} from './NameEditor';
 import {SimNames} from './SimNames';
@@ -70,6 +71,7 @@ function App(){
   try{await api('push/preview/off',{});setPreview(false);setPushStatus('已关闭短信预览')}
   catch(e){fail(e)}finally{setPushBusy(false)}
  }
+ useEffect(()=>{if(paired)void refreshPushKeys(body=>api('push/keys',body))},[paired]);
  async function subscribe(wantPreview=preview===true){
   if(pushBusy)return;
   setPushBusy(true);
@@ -79,8 +81,8 @@ function App(){
    const {key}=await api<{key:string}>('push/key');const decoded=atob(key.replace(/-/g,'+').replace(/_/g,'/'));const bytes=Uint8Array.from(decoded,c=>c.charCodeAt(0));
    const registration=await navigator.serviceWorker.ready;
    const subscription=await registration.pushManager.getSubscription()||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});
-   const keys=wantPreview?subscription.toJSON().keys:undefined;
-   if(wantPreview&&(!keys?.p256dh||!keys.auth))throw Error('设备未提供通知加密密钥，请重新订阅');
+   const keys=subscription.toJSON().keys;
+   if(!keys?.p256dh||!keys.auth)throw Error('设备未提供通知加密密钥，请重新订阅');
    await api('push/subscribe',{endpoint:subscription.endpoint,preview:wantPreview,...keys});
    setPreview(wantPreview);setPushStatus('已订阅；请发送测试通知并在设备确认');
   }catch(e){setPushStatus('推送订阅失败');fail(e)}finally{setPushBusy(false)}
@@ -251,21 +253,27 @@ function App(){
  const unreadCount=list.filter(c=>isUnread(c.items,meta.get(c.key))).length;
  useEffect(()=>{
   if(!paired||!metadataReady||!navigator.setAppBadge)return;
+  let disposed=false,requestId=0,requesting=false;
   // A suspended page must not overwrite a newer background push with stale state.
-  const reconcileBadge=()=>{
-   if(document.hidden)return;
-   const update=unreadCount?navigator.setAppBadge!(unreadCount):navigator.clearAppBadge!();
-   void update.catch(()=>{});
+  const reconcileBadge=async()=>{
+   if(document.hidden||requesting)return;
+   requesting=true;
+   const id=++requestId;
+   try {
+    const {count}=await api<{count:number}>('badge',{region});
+    if(disposed||id!==requestId||document.hidden||!Number.isSafeInteger(count)||count<0)return;
+    if(count)await navigator.setAppBadge!(count);else await navigator.clearAppBadge?.();
+   }catch{/* Keep the previous badge when the server cannot confirm the count. */}
+   finally{requesting=false}
   };
   reconcileBadge();
-  // Resume may precede the fresh inbox response. Restore known unread state, but
-  // do not clear a newer push dot using a pre-suspension zero.
-  const restoreBadge=()=>{if(unreadCount>0)reconcileBadge()};
+  // On resume query the full count, never the incomplete first inbox page.
+  const restoreBadge=()=>{void reconcileBadge()};
   document.addEventListener('visibilitychange',restoreBadge);
   window.addEventListener('pageshow',restoreBadge);
   window.addEventListener('focus',restoreBadge);
-  return()=>{document.removeEventListener('visibilitychange',restoreBadge);window.removeEventListener('pageshow',restoreBadge);window.removeEventListener('focus',restoreBadge)};
- },[paired,metadataReady,unreadCount]);
+  return()=>{disposed=true;document.removeEventListener('visibilitychange',restoreBadge);window.removeEventListener('pageshow',restoreBadge);window.removeEventListener('focus',restoreBadge)};
+ },[paired,metadataReady,unreadCount,region]);
  const contextItems=source.find(c=>c.key===(contextKey||lastContext.current))?.items||[],contextName=contextItems.find(m=>m.name)?.name||formatPhone(contextKey||lastContext.current||'',region);
  const lastOutgoing=current.map(m=>m.incoming).lastIndexOf(false);
  const navigation=useNavigation(screen,listPage,detailPage,()=>{setSheet(false);setMessageMenu(null);setMenu(false);setEditMenu(false);setActive(null);setScreen('messages');setError('')});

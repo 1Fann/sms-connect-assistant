@@ -258,6 +258,13 @@ class PeerHub internal constructor(val ctx: Context, databaseName:String="paired
         else -> devices.joinToString(prefix=" AND device IN (",postfix=")") { DatabaseUtils.sqlEscapeString(it) }
     }
     fun page(before:Long,devices:Set<String>?=null)=rows("SELECT row FROM history WHERE seq<?"+scope(devices)+" ORDER BY seq DESC LIMIT 200",arrayOf(before.toString()))
+    fun forEachBadgeRow(devices:Set<String>,consume:(SmsBadgeRow)->Unit) {
+        // Read only authorized rows; Gson skips body/name fields for this projection.
+        // No pagination cap: older unread conversations still contribute to the badge.
+        for(table in listOf("history","sends"))readableDatabase.rawQuery("SELECT row FROM $table WHERE 1"+scope(devices),null).use { c ->
+            while(c.moveToNext())consume(gson.fromJson(c.getString(0),SmsBadgeRow::class.java))
+        }
+    }
     fun visibleAddresses(devices:Set<String>):Set<String> {
         val filter=scope(devices)
         val query="SELECT address FROM history WHERE address IS NOT NULL"+filter+" UNION SELECT address FROM sends WHERE address IS NOT NULL"+filter
